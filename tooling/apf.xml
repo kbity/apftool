@@ -3,7 +3,9 @@
 
   <mime-type type="image/x-apf">
     <comment>Aperture Picture Format image</comment>
-    <glob pattern="*.apf"/>
+    <magic priority="100">
+      <match value="APERTURE IMAGE FORMAT (c) 1985" type="string" offset="0" />
+    </magic>
   </mime-type>
 
 </mime-info>
