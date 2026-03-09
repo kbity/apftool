@@ -1,6 +1,7 @@
 import sys, io, os, apftool, subprocess
 
 path = "/tmp/apf_preview.png"
+viewer = "xviewer"
 
 def main():
     if len(sys.argv) < 2:
@@ -12,14 +13,14 @@ def main():
     ext = ext.lower()
 
     # APF → PNG
-    if ext == ".apf":
-        with open(input_path, "r") as f:
-            apf_content = f.read()
+    with open(input_path, "r") as f:
+        apf_content = f.read()
+    if apf_content.startswith("APERTURE IMAGE FORMAT (c) 1985"):
         decoded_bytes = apftool.decodeapf(apf_content)
         output_path = base + ".png"
         with open(path, "wb") as f:
             f.write(decoded_bytes)
-        subprocess.Popen(["xviewer", path])
+        subprocess.Popen([viewer, path])
 
     else:
         print("Unsupported file type. Use APF.")
