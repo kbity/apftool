@@ -4,7 +4,7 @@ import io, textwrap
 # width and height are 320x200 for standard apf files
 af2headertext = "APERTURE IMAGE FORMAT (c) 1993" # af2 header
 
-def af2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: list):
+def af2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: list, trans: bool = False):
     x = 0
     y = h-1
     passoffset = 0
@@ -24,7 +24,10 @@ def af2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int,
                 y -= passoffset
         state = not state
 
-    img = Image.new("RGB", (w, h))
+    colmode = "RGB"
+    if trans:
+        colmode+="A"
+    img = Image.new(colmode, (w, h))
     pixels = img.load()
 
     for y in range(h):
@@ -37,7 +40,7 @@ def af2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int,
                 pixels[x, y] = pals[0]
     return img
 
-def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: str):
+def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: str, trans: bool = False):
     x = 0
     y = h-1
     passoffset = 0
@@ -50,6 +53,8 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
         hexcs = col[1:]
         hexcsegment = textwrap.wrap(hexcs, 2)
         pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
+    if trans:
+        pal[" "] = (0, 0, 0, 0)
 
     for pair in range(len(data)//2):
         color = data[pair*2]
@@ -68,7 +73,10 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
                 passoffset += 1
                 y -= passoffset
 
-    img = Image.new("RGB", (w, h))
+    colmode = "RGB"
+    if trans:
+        colmode+="A"
+    img = Image.new(colmode, (w, h))
     pixels = img.load()
 
     for y in range(h):
@@ -108,6 +116,7 @@ def decodeaf2(af2: str, format: str = 'PNG'):
     else:
         datatype = "singlestream"
         data = apf_lines[3]
+    istrans = ("t" in arguments)
 
     apfbuffer = []
     for i in range((h)):
@@ -121,7 +130,10 @@ def decodeaf2(af2: str, format: str = 'PNG'):
         if mode == "legacy":
             pals = apf_lines[2].split(".")
             if pals[0] == "":
-                pals[0] = (0,0,0)
+                if istrans:
+                    pals[0] = (0,0,0,0)
+                else:
+                    pals[0] = (0,0,0)
             else:
                 hexcsegment = textwrap.wrap(pals[0], 2)
                 pals[0] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
@@ -132,11 +144,11 @@ def decodeaf2(af2: str, format: str = 'PNG'):
                 pals[1] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
             for ds in data:
-                imgs.append(af2_apfdecodedata(ds, h, w, apfbuffer, lineskip, pals))
+                imgs.append(af2_apfdecodedata(ds, h, w, apfbuffer, lineskip, pals, istrans))
         else:
             pals = apf_lines[2]
             for ds in data:
-                imgs.append(af2decodedata(ds, h, w, apfbuffer, lineskip, pals))
+                imgs.append(af2decodedata(ds, h, w, apfbuffer, lineskip, pals, istrans))
         imageData = io.BytesIO()
         imgs[0].save(
             imageData,
@@ -144,14 +156,18 @@ def decodeaf2(af2: str, format: str = 'PNG'):
             save_all=True,
             append_images=imgs[1:],
             loop=0,
-            duration=100
+            duration=100,
+            disposal=2
         )
         imageData = imageData.getvalue()
     else:
         if mode == "legacy":
             pals = apf_lines[2].split(".")
             if pals[0] == "":
-                pals[0] = (0,0,0)
+                if istrans:
+                    pals[0] = (0,0,0,0)
+                else:
+                    pals[0] = (0,0,0)
             else:
                 hexcsegment = textwrap.wrap(pals[0], 2)
                 pals[0] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
@@ -161,28 +177,83 @@ def decodeaf2(af2: str, format: str = 'PNG'):
                 hexcsegment = textwrap.wrap(pals[1], 2)
                 pals[1] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
-            img = af2_apfdecodedata(data, h, w, apfbuffer, lineskip, pals)
+            img = af2_apfdecodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
         else:
             pals = apf_lines[2]
-            img = af2decodedata(data, h, w, apfbuffer, lineskip, pals)
+            img = af2decodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
         imageData = io.BytesIO()
         img.save(imageData, format=format)
         imageData = imageData.getvalue()
 
     return imageData
 
-def reduce_to_af2_quality(img: Image, num_colors: int = 95):
-    img = img.convert("P", palette=Image.ADAPTIVE, colors=num_colors, dither=Image.NONE) # disable dithering to reduce file sizes
-    
-    # get the palette as tuples
-    raw_palette = img.getpalette()[:num_colors*3]
-    palette = [tuple(raw_palette[i:i+3]) for i in range(0, len(raw_palette), 3)]
-    
-    return img, palette
+def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans: bool = False):
+    if animated:
+        ifuckinghatequantize = (253, 0, 254)
 
-def reduce_to_apf_in_af2_quality(img: Image):
-    img = img.convert("1")
-    return img
+        frames = []
+        if trans:
+            for frame in ImageSequence.Iterator(img):
+                frame = frame.convert("RGBA")
+                background = Image.new("RGBA", frame.size, ifuckinghatequantize + (255,))
+                composited = Image.alpha_composite(background, frame)
+                frames.append(composited.convert("RGB"))
+        else:
+            frames = [frame.copy().convert("RGB") for frame in ImageSequence.Iterator(img)]
+
+        widths, heights = zip(*(f.size for f in frames))
+        total_width = max(widths)
+        total_height = sum(heights)
+        combined = Image.new("RGB", (total_width, total_height))
+        y_offset = 0
+
+        for frame in frames:
+            combined.paste(frame, (0, y_offset))
+            y_offset += frame.height
+
+        if trans:
+            combined_p = combined.convert("P", palette=Image.ADAPTIVE, colors=num_colors-1, dither=Image.NONE)
+
+            pal = combined_p.getpalette()
+            pal = [253, 0, 254] + pal
+            combined_p.putpalette(pal)
+        else:
+            combined_p = combined.convert("P", palette=Image.ADAPTIVE, colors=num_colors-1, dither=Image.NONE)
+        
+        frames_p = []
+        for frame in frames:
+            f_p = frame.quantize(palette=combined_p, dither=Image.NONE)
+            if trans:
+                f_p.info["transparency"] = 0
+            frames_p.append(f_p)
+
+        raw_palette = combined_p.getpalette()[:num_colors*3]
+        seen = set()
+        palette = [tuple(raw_palette[i:i+3]) for i in range(0, len(raw_palette), 3) if not (tuple(raw_palette[i:i+3]) in seen or seen.add(tuple(raw_palette[i:i+3])))]
+        
+        return frames_p, palette
+    else:
+        img = img.convert("P", palette=Image.ADAPTIVE, colors=num_colors, dither=Image.NONE) # disable dithering to reduce file sizes
+    
+        # get the palette as tuples
+        raw_palette = img.getpalette()[:num_colors*3]
+        seen = set()
+        palette = [c for c in (tuple(raw_palette[i:i+3]) for i in range(0, len(raw_palette), 3)) if not (c in seen or seen.add(c))]
+
+        return img, palette
+
+def reduce_to_apf_in_af2_quality(img: Image, animated: bool = False):
+    if animated:
+        frames = []
+
+        for frame in ImageSequence.Iterator(img):
+            bw = frame.convert("1")  # 1-bit black/white
+            frames.append(bw)
+
+        return frames
+    else:
+        img = img.convert("1")
+        return img
 
 def generate_runs_af2_l(bitmap: list, lineskip: int, w: int, h: int):
     runcounter = 0
@@ -215,13 +286,26 @@ def generate_runs_af2_l(bitmap: list, lineskip: int, w: int, h: int):
         runlens.append(runcounter)
     return runlens
 
-def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int):
+def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans: bool = False):
     colpal = {}
     colpalbnr = {}
+    reservespace = False
+    if not len(palette) == 95:
+        reservespace = True
+
     for i in range(0,len(palette)):
-        colpal[chr(i+32)] = palette[i]
-    for key in colpal:
-        colpalbnr[colpal[key]] = key
+        colpal[chr(i+32+int(reservespace))] = palette[i]
+    if trans:
+        for key in colpal:
+            kreisi = list(colpal[key])
+            kreisi.append(255)
+            kreisi = tuple(kreisi)
+            colpalbnr[kreisi] = key
+        colpalbnr[(0, 0, 0, 0)] = " "
+        colpalbnr[(253, 0, 254, 0)] = " "
+    else:
+        for key in colpal:
+            colpalbnr[colpal[key]] = key
 
     af2pal_array = []
     af2pal = ""
@@ -267,17 +351,34 @@ def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int
     total = sum(rldb)
     return runlens, af2pal
 
-def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False):
+def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans: bool = False, pal: int = 95):
+    if pal > 95:
+        pal = 95
+    if trans and (pal == 95):
+        pal = 94
+
     img = Image.open(io.BytesIO(img))
+    animated = getattr(img, "is_animated", False)
     if legacy:
-        img = reduce_to_apf_in_af2_quality(img)
+        img = reduce_to_apf_in_af2_quality(img, animated)
     else:
-        img, palette = reduce_to_af2_quality(img)
+        img, palette = reduce_to_af2_quality(img, pal, animated, trans)
+
     imageData = io.StringIO()
     apflist = [af2headertext]
     metadata = []
-    pixels = img.load()
-    res = img.size
+    frames = []
+    if animated:
+        for image in img:
+            if legacy:
+                frames.append(image.load())
+            else:
+                frames.append(image)
+        #pixels = frames[0]
+        res = img[0].size
+    else:
+        pixels = img.load()
+        res = img.size
     metadata.append(f"{res[0]}x{res[1]}")
     w = res[0]
     h = res[1]
@@ -285,6 +386,10 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
     args = ""
     if legacy:
         args+="l"
+    if trans:
+        args+="t"
+    if animated:
+        args+="m"
 
     metadata.append(args)
     if not findbestlineskip:
@@ -294,16 +399,41 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
     if legacy and not findbestlineskip:
         apflist.append(".")
     if legacy:
-        bitmap = [[pixels[x, y] != 0 for x in range(w)] for y in range(h)]
+        if animated:
+            bitmaps = []
+            for pixels in frames:
+                bitmaps.append([[pixels[x, y] != 0 for x in range(w)] for y in range(h)])
+        else:
+            bitmap = [[pixels[x, y] != 0 for x in range(w)] for y in range(h)]
     else:
-        img_rgb = img.convert("RGB")
-        pixels = img_rgb.load()
-        bitmap = [[pixels[x, y] for x in range(img.width)] for y in range(img.height)]
+        colmode = "RGB"
+        if trans:
+            colmode+="A"
+        if animated:
+            bitmaps = []
+            for img in frames:
+                if trans:
+                    img = img.convert("RGBA")
+                img_rgb = img.convert(colmode)
+                pixels = img_rgb.load()
+                if trans:
+                    bitmaps.append([[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(img.width)] for y in range(img.height)])
+                else:
+                    bitmaps.append([[pixels[x, y] for x in range(img.width)] for y in range(img.height)])
+        else:
+            img_rgb = img.convert(colmode)
+            pixels = img_rgb.load()
+            if trans:
+                bitmap = [[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(img.width)] for y in range(img.height)]
+            else:
+                bitmap = [[pixels[x, y] for x in range(img.width)] for y in range(img.height)]
+
         img_rgb = None # take out the trash
         pixels = None
+        frames = None
 
     output = ""
-    if findbestlineskip:
+    if findbestlineskip and not animated: # animated images may be wildly inconsistant, and computing them all would take a really long time for what is a small efficiency gain in file size.
         lens = {}
         shortestId = None
         shortestlen = 999999999
@@ -316,7 +446,7 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
             if legacy:
                 lens[ls] = generate_runs_af2_l(bitmap, int(ls), w, h)
             else:
-                lens[ls], af2pal = generate_runs_af2(bitmap, palette, int(ls), w, h)
+                lens[ls], af2pal = generate_runs_af2(bitmap, palette, int(ls), w, h, trans)
         for ls in lens:
             totallen = len(lens[ls])+len(str(ls))
             if totallen < shortestlen:
@@ -333,18 +463,47 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
         else:
             for num in runlens:
                 output += num[0]+chr(num[1]+32)
+        if trans and not legacy:
+            af2pal = " FF00FF"+af2pal # this is for decoders without transparency support
         apflist.append(af2pal)
     else:
-        if legacy:
-            runlens = generate_runs_af2_l(bitmap, lineskip, w, h)
-            for num in runlens:
-                output += chr(num+32)
-        else:
-            runlens, af2pal = generate_runs_af2(bitmap, palette, lineskip, w, h)
-            apflist.append(af2pal)
-            for num in runlens:
-                output += num[0]+chr(num[1]+32)
+        if animated:
+            if legacy:
+                outputs = []
+                for bitmap in bitmaps:
+                    temp = ""
+                    runlens = generate_runs_af2_l(bitmap, lineskip, w, h)
+                    for num in runlens:
+                        temp += chr(num+32)
+                    outputs.append(temp)
+                output = "\n".join(outputs)
+            else:
+                #raise Exception("Unsupported!")
+                outputs = []
+                _, af2pal = generate_runs_af2(bitmaps[0], palette, lineskip, w, h, trans)
+                for bitmap in bitmaps:
+                    temp = ""
+                    runlens, _ = generate_runs_af2(bitmap, palette, lineskip, w, h, trans)
+                    for num in runlens:
+                        temp += num[0]+chr(num[1]+32)
+                    outputs.append(temp)
 
+                output = "\n".join(outputs)
+                if trans:
+                    af2pal = " FF00FF"+af2pal # this is for decoders without transparency support
+                apflist.append(af2pal)
+        else:
+            if legacy:
+                runlens = generate_runs_af2_l(bitmap, lineskip, w, h)
+                for num in runlens:
+                    output += chr(num+32)
+            else:
+                runlens, af2pal = generate_runs_af2(bitmap, palette, lineskip, w, h, trans)
+                if trans and not legacy:
+                    af2pal = " FF00FF"+af2pal # this is for decoders without transparency support
+                apflist.append(af2pal)
+                for num in runlens:
+                    output += num[0]+chr(num[1]+32)
     apflist.append(output)
     apftext = "\n".join(apflist)
     return apftext
@@ -358,18 +517,69 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
 #    f.write(decodedapf)
 
 # the following is an example of usage of the encoder. it expects a bytes image as an input, outputs a string.
-file_path = 'alarm.png'
+file_path = '3DFix.gif'
 with open(file_path, "rb") as f:
     data = io.BytesIO()
     data = f.read()
 
-encodedapf = encodeaf2(data, 20, True, False)
-with open("alrmbls.af2", "w") as f:
+encodedapf = encodeaf2(data, 1, False, True, False)
+with open("3DFix_l.af2", "w") as f:
     f.write(encodedapf)
 
-file_path = 'alrmbls.af2'
+file_path = '3DFix_l.af2'
 with open(file_path, 'r') as f:
     file_content = f.read()
 decodedapf = decodeaf2(file_content)
-with open("alrmbls.png", "wb") as f:
+with open("decoded_3DFix_l.gif", "wb") as f:
+    f.write(decodedapf)
+
+#another
+file_path = 'ball.gif'
+with open(file_path, "rb") as f:
+    data = io.BytesIO()
+    data = f.read()
+
+encodedapf = encodeaf2(data, 1, False, True, True)
+with open("ball_l.af2", "w") as f:
+    f.write(encodedapf)
+
+file_path = 'ball_l.af2'
+with open(file_path, 'r') as f:
+    file_content = f.read()
+decodedapf = decodeaf2(file_content)
+with open("decoded_ball_l.gif", "wb") as f:
+    f.write(decodedapf)
+
+#another
+file_path = 'bacon.jpg'
+with open(file_path, "rb") as f:
+    data = io.BytesIO()
+    data = f.read()
+
+encodedapf = encodeaf2(data, 1, False, True, False)
+with open("bacon_l.af2", "w") as f:
+    f.write(encodedapf)
+
+file_path = 'bacon_l.af2'
+with open(file_path, 'r') as f:
+    file_content = f.read()
+decodedapf = decodeaf2(file_content)
+with open("decoded_bacon_l.png", "wb") as f:
+    f.write(decodedapf)
+
+#another
+file_path = 'block_tired.png'
+with open(file_path, "rb") as f:
+    data = io.BytesIO()
+    data = f.read()
+
+encodedapf = encodeaf2(data, 1, False, True, True)
+with open("block_tired_l.af2", "w") as f:
+    f.write(encodedapf)
+
+file_path = 'block_tired_l.af2'
+with open(file_path, 'r') as f:
+    file_content = f.read()
+decodedapf = decodeaf2(file_content)
+with open("decoded_block_tired_l.png", "wb") as f:
     f.write(decodedapf)
