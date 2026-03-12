@@ -15,8 +15,8 @@ def main():
     # APF → PNG
     with open(input_path, "r") as f:
         apf_content = f.read()
-    if apf_content.startswith("APERTURE IMAGE FORMAT (c) 1985"):
-        decoded_bytes = apftool.decodeapf(apf_content)
+    if apf_content.startswith("APERTURE IMAGE FORMAT (c) 1985") or  apf_content.startswith("APERTURE IMAGE FORMAT (c) 1993"):
+        decoded_bytes = apftool.decodeaf2(apf_content)
         output_path = base + ".png"
         with open(path, "wb") as f:
             f.write(decoded_bytes)
