@@ -6,7 +6,7 @@ w = 320
 h = 200
 headertext = "APERTURE IMAGE FORMAT (c) 1985" # header may change for alternate variations with different resolutions
 
-def decodeapf(apf: str):
+def decodeapf(apf: str, format: str = 'PNG', returnImageObject: bool = False):
     apf_list = apf.splitlines()
     apf_lines = []
     for line in apf_list:
@@ -55,10 +55,13 @@ def decodeapf(apf: str):
             else:
                 pixels[x, y] = (0, 0, 0)
 
-    imageData = io.BytesIO()
-    img.save(imageData, format='PNG')
-    imageData = imageData.getvalue()
-    return imageData
+    if returnImageObject:
+        return img
+    else:
+        imageData = io.BytesIO()
+        img.save(imageData, format=format)
+        imageData = imageData.getvalue()
+        return imageData
 
 def reduce_to_apf_quality(img: Image):
     size = (w, h) # size for apf encoder

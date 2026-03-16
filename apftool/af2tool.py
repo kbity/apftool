@@ -87,7 +87,7 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
 
     return img
 
-def decodeaf2(af2: str, format: str = 'PNG'):
+def decodeaf2(af2: str, format: str = 'PNG', returnImageObject: bool = False):
     apf_list = af2.splitlines()
     apf_lines = []
     for line in apf_list:
@@ -181,11 +181,30 @@ def decodeaf2(af2: str, format: str = 'PNG'):
         else:
             pals = apf_lines[2]
             img = af2decodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
-        imageData = io.BytesIO()
-        img.save(imageData, format=format)
-        imageData = imageData.getvalue()
-
-    return imageData
+    if returnImageObject:
+        if datatype == "multistream":
+            return imgs # list object, be careful
+        else:
+            return img
+    else:
+        if datatype == "multistream":
+            imageData = io.BytesIO()
+            imgs[0].save(
+                imageData,
+                format="GIF",
+                save_all=True,
+                append_images=imgs[1:],
+                loop=0,
+                duration=100,
+                disposal=2
+            )
+            imageData = imageData.getvalue()
+            return imageData
+        else:
+            imageData = io.BytesIO()
+            img.save(imageData, format=format)
+            imageData = imageData.getvalue()
+            return imageData
 
 def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans: bool = False):
     if animated:
@@ -489,6 +508,8 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
                     outputs.append(temp)
 
                 output = "\n".join(outputs)
+                if findbestlineskip:
+                    apflist.append(metadata)
                 if trans:
                     af2pal = " FF00FF"+af2pal # this is for decoders without transparency support
                 apflist.append(af2pal)
