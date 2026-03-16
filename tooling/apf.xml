@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
 
-  <mime-type type="image/x-apf">
+  <mime-type type="image/x-aperture-picture">
     <comment>Aperture Picture Format image</comment>
     <magic priority="100">
       <match value="APERTURE IMAGE FORMAT (c) 1985" type="string" offset="0" />
@@ -9,7 +9,7 @@
   </mime-type>
 
   
-  <mime-type type="image/x-apf2">
+  <mime-type type="image/x-aperture-picture-1993">
     <comment>Aperture Image Format 2 image</comment>
     <magic priority="100">
       <match value="APERTURE IMAGE FORMAT (c) 1993" type="string" offset="0" />
