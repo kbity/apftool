@@ -18,7 +18,7 @@ if (random.randint(1, 8) == 1): # 12.5% chance for animation
     flags+= "m"
 header.append(flags)
 header.append(str(random.randint(1, h)))
-if (random.randint(1, 2) == 1):
+if (random.randint(1, 2) == 1): # 50% chance for description
     randomdesc = ""
     for _ in range(1, random.randint(1, 100)):
         randomdesc += random.choice(randomletters)
@@ -67,5 +67,14 @@ for _ in range(1, random.randint(1, 45)):
     randomname += random.choice(randomletters)
 
 print(f"{randomname}.apf2")
+print("")
+print("Header Data:")
+apf2 = apf2data.splitlines()
+print(apf2[0])
+print(apf2[1])
+print(apf2[2])
+print("")
+print(f"Total Frames: {len(apf2)-3}")
+
 with open(f"{randomname}.apf2", "w") as text_file:
     text_file.write(apf2data)
