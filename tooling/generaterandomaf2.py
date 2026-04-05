@@ -1,4 +1,5 @@
-import random
+import random, os
+os.makedirs("apf2dumpster", exist_ok=True)
 
 apf2data = "" # create blank image
 randomletters = "qwertyuiopasdfghjklzxcvbnm "
@@ -76,5 +77,5 @@ print(apf2[2])
 print("")
 print(f"Total Frames: {len(apf2)-3}")
 
-with open(f"{randomname}.apf2", "w") as text_file:
+with open(f"apf2dumpster/{randomname}.apf2", "w") as text_file:
     text_file.write(apf2data)
