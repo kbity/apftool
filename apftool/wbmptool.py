@@ -1,5 +1,5 @@
 import io, textwrap, os, math
-from PIL import Image, ImageSequence
+from PIL import Image, ImageSequence, ImageOps
 
 def bitstring_to_bytes(s):
     s = s.replace(" ", "")
@@ -67,7 +67,12 @@ def encodewbmp(img: Image):
 
     return payload
 
-def decodewbmp(wbmp: Bytes, format: str = 'PNG', returnImageObject: bool = False):
+def tonearest8(i: int):
+    while not (i%8 == 0):
+        i+=1
+    return i
+
+def decodewbmp(wbmp: bytes, format: str = 'PNG', returnImageObject: bool = False):
     w = 0
     h = 0
     it = 0
@@ -83,7 +88,7 @@ def decodewbmp(wbmp: Bytes, format: str = 'PNG', returnImageObject: bool = False
                 x = it % w
                 y = it // w
                 if 0 <= x < w and 0 <= y < h:
-                    pixels[x, y] = bit 
+                    pixels[x, y] = bit
                 it += 1
         else:
             it += 1
@@ -97,6 +102,8 @@ def decodewbmp(wbmp: Bytes, format: str = 'PNG', returnImageObject: bool = False
                 if byte <= 127:  # last byte of uintvar
                     w = decode_uintvar(buffer)
                     buffer = bytearray()
+                    oldw = w
+                    w = tonearest8(w)
             elif h == 0:
                 if byte <= 127:  # last byte of uintvar
                     h = decode_uintvar(buffer)
@@ -105,6 +112,9 @@ def decodewbmp(wbmp: Bytes, format: str = 'PNG', returnImageObject: bool = False
                     img = Image.new("1", (w, h))
                     pixels = img.load()
                     it = 0
+    ds = w-oldw
+    print(ds)
+    img = img.crop((0,0,oldw,h))
 
     if returnImageObject:
         return img

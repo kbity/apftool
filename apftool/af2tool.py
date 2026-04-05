@@ -83,7 +83,10 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
         row = apfbuffer[y]
 
         for x in range(w):
-            pixels[x, y] = row[x]
+            if not row[x]:
+                pixels[x, y] = (255,0,255)
+            else:
+                pixels[x, y] = row[x]
 
     return img
 
@@ -358,7 +361,12 @@ def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int
                 runcounter += 1
             else:
                 if currentrun is not None:
-                    runlens.append([colpalbnr[currentrun], runcounter])
+                    if trans and currentrun[3] == 0:
+                        currentrun = (0,0,0,0)
+                    if not currentrun in colpalbnr:
+                        runlens.append([" ", runcounter])
+                    else:
+                        runlens.append([colpalbnr[currentrun], runcounter])
                 runcounter = 1
                 currentrun = pixel
     if runcounter > 0:
@@ -528,21 +536,3 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
     apflist.append(output)
     apftext = "\n".join(apflist)
     return apftext
-
-# the following is an example of usage of the decoder. it expects a string as an input, outputs a bytes image.
-#file_path = 'input.af2'
-#with open(file_path, 'r') as f:
-#    file_content = f.read()
-#decodedapf = decodeaf2(file_content, 'PNG')
-#with open("output.png", "wb") as f:
-#    f.write(decodedapf)
-
-# the following is an example of usage of the encoder. it expects a bytes image as an input, outputs a string.
-#file_path = 'input.png'
-#with open(file_path, "rb") as f:
-#    data = io.BytesIO()
-#    data = f.read()
-
-#encodedapf = encodeaf2(data, 1, False, True, False)
-#with open("output.af2", "w") as f:
-#    f.write(encodedapf)

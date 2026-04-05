@@ -135,22 +135,3 @@ def encodeapf(img: bytes, lineskip: int = 1, findbestlineskip: bool = False):
     apflist.append(output)
     apftext = "\n".join(apflist)
     return apftext
-
-# the following is an example of usage of the decoder. it expects a string as an input, outputs a bytes image.
-#file_path = 'input.apf'
-#with open(file_path, 'r') as f:
-#    file_content = f.read()
-#decodedapf = decodeapf(file_content)
-#with open("output.png", "wb") as f:
-#    f.write(decodedapf)
-
-# the following is an example of usage of the encoder. it expects a bytes image as an input, outputs a string.
-#file_path = 'output.png'
-#with open(file_path, "rb") as f:
-#    data = io.BytesIO()
-#    data = f.read()
-
-#encodedapf = encodeapf(data, 3, True)
-#with open("output.apf", "w") as f:
-#    f.write(encodedapf)
-
