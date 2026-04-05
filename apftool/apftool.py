@@ -31,7 +31,8 @@ def decodeapf(apf: str, format: str = 'PNG', returnImageObject: bool = False):
     for char in data:
         runlen = ord(char) - 32
         for i in range(runlen):
-            apfbuffer[y][x] = (state)
+            if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
+                apfbuffer[y][x] = (state)
             x += 1
             if not x < w:
                 y = y - lineskip

@@ -13,7 +13,8 @@ def af2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int,
     for char in data:
         runlen = ord(char) - 32
         for i in range(runlen):
-            apfbuffer[y][x] = (state)
+            if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
+                apfbuffer[y][x] = (state)
             x += 1
             if not x < w:
                 y = y - lineskip
@@ -61,7 +62,8 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
         runlen = ord(data[pair*2+1]) - 32
 
         for i in range(runlen):
-            apfbuffer[y][x] = pal[color]
+            if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
+                apfbuffer[y][x] = pal[color]
 
             x += 1
             if x >= w:
