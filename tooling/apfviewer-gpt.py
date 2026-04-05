@@ -2,7 +2,7 @@ import PIL, sys, os, io
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
-from apftool import decodeaf2, extensions
+from apftool import decodeaf2, decodewbmp, extensions, extensions_wbmp
 
 tupleware = []
 cf = 0
@@ -10,6 +10,8 @@ limit = 0
 
 for ex in extensions:
     tupleware.append(('Aperture Image Format', ex))
+for ex in extensions_wbmp:
+    tupleware.append(('Wireless Bitmap', ex))
 tupleware = tuple(tupleware)
 
 if len(sys.argv) < 2:
@@ -22,17 +24,24 @@ if not isinstance(filename, str):
 
 base, ext = os.path.splitext(filename)
 
+wbmp = False
 if ext not in extensions:
-    messagebox.showerror("Error", "Unsupported file, please use an APF or AF2 Image.")
-    quit()
-
-with open(filename, "r") as f:
-    data = f.read()
+    if ext in extensions_wbmp:
+        wbmp = True
+    else:
+        messagebox.showerror("Error", "Unsupported file, please use an APF or AF2 Image.")
+        quit()
 
 root = tk.Tk()
-root.title("apfviewer")
-
-imgdat = decodeaf2(data, 'BRUH', True)
+root.title(f"{filename} - apfviewer")
+if wbmp:
+    with open(filename, "rb") as f:
+        data = f.read()
+    imgdat = decodewbmp(data, 'BRUH', True)
+else:
+    with open(filename, "r") as f:
+        data = f.read()
+    imgdat = decodeaf2(data, 'BRUH', True)
 
 if isinstance(imgdat, list):
     animated = True
