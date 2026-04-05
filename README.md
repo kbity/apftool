@@ -1,4 +1,4 @@
-a small library for converting to and from Aperture Science apf files.
+A library for converting to and from Aperture Science apf files, the custom extended apf2s, and wbmp images.
 
 usage: 
 
