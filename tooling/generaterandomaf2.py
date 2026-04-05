@@ -10,10 +10,12 @@ h = random.randint(1, 999)
 header = []
 header.append(f"{w}x{h}")
 flags = ""
-if (random.randint(1, 4) == 1):
-    flags+= "l"
-if (random.randint(1, 2) == 1):
+if (random.randint(1, 2) == 1): # 50% chance for transparency
     flags+= "t"
+if (random.randint(1, 4) == 1): # 25% chance for 2 colors
+    flags+= "l"
+if (random.randint(1, 8) == 1): # 12.5% chance for animation
+    flags+= "m"
 header.append(flags)
 header.append(str(random.randint(1, h)))
 if (random.randint(1, 2) == 1):
@@ -49,10 +51,16 @@ if not 'l' in flags:
     fent = fent*2
 
 data = ""
-for _ in range(0,fent):
-    data += chr(random.randint(32, 126))
-
-apf2data += "\n"+data
+if 'm' in flags:
+    for _ in range(0,random.randint(0, 30)):
+        data = ""
+        for _ in range(0,fent):
+            data += chr(random.randint(32, 126))
+        apf2data += "\n"+data
+else:
+    for _ in range(0,fent):
+        data += chr(random.randint(32, 126))
+    apf2data += "\n"+data
 
 randomname = ""
 for _ in range(1, random.randint(1, 45)):
