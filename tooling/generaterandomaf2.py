@@ -76,6 +76,9 @@ print(apf2[1])
 print(apf2[2])
 print("")
 print(f"Total Frames: {len(apf2)-3}")
+if len(apf2)-3 == 0:
+print("Adding Blank Frame...")
+    apf2data+="\n "
 
 with open(f"apf2dumpster/{randomname}.apf2", "w") as text_file:
     text_file.write(apf2data)
