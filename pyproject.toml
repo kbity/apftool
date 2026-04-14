@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apftool"
-version = "0.3.2"
-description = "Aperture Science Image Format (apf) encoder and decoder"
+version = "0.4.3"
+description = "Encoder and decoder for Aperture Science Image Format (apf), Aperture Science Image Format 2 (apf2), Wireless Bitmap (wbmp), and Over-The-Air Bitmap (otb)"
 authors = [{name = "Mari (kbity)"}]
 readme = "README.md"
 requires-python = ">=3.10"

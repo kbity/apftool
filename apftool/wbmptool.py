@@ -42,7 +42,7 @@ def encodewbmp(img: Image):
     height = res[1]
     payload += mk_uintvar(width)
     payload += mk_uintvar(height)
-    print(f"header: {payload.hex()}")
+    #print(f"header: {payload.hex()}")
     bitmap = [[pixels[x, y] for x in range(img.width)] for y in range(img.height)]
 
     collection = ""
@@ -113,7 +113,7 @@ def decodewbmp(wbmp: bytes, format: str = 'PNG', returnImageObject: bool = False
                     pixels = img.load()
                     it = 0
     ds = w-oldw
-    print(ds)
+    #print(ds)
     img = img.crop((0,0,oldw,h))
 
     if returnImageObject:
