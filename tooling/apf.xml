@@ -30,4 +30,9 @@
     <glob pattern="*.otab"/>
   </mime-type>
 
+  <mime-type type="image/x-bruhiff">
+    <comment>Blazingly rapid uncompressed harebrained image</comment>
+    <glob pattern="*.bruh"/>
+  </mime-type>
+
 </mime-info>
