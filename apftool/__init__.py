@@ -4,15 +4,17 @@ from .apftool import encodeapf, decodeapf
 from .af2tool import encodeaf2, decodeaf2
 from .wbmptool import encodewbmp, decodewbmp
 from .otabtool import encodeotab, decodeotab
+from .bruhtool import encodebruh, decodebruh
 
 extensions = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".txt", ".text")
 extensions_apf = (".apf", ".aif", ".txt", ".text")
 extensions_apf2 = (".apf2", ".af2", ".ap2", ".aif2", ".txt")
 extensions_wbmp = (".wbmp", ".wbitmap", ".wbm")
 extensions_otab = (".otb", ".ota", ".otab")
+extensions_bruh = (".bruh", ".brh")
 
 extensions_txt = (".txt", ".text") # txt is seen as a generic container for apf/apf2 because they're just txt files
-extensions_all = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".txt", ".text", ".wbmp", ".wbitmap", ".wbm", ".otb", ".ota", ".otab") # useful for decodeany
+extensions_all = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".txt", ".text", ".wbmp", ".wbitmap", ".wbm", ".otb", ".ota", ".otab", ".bruh", ".brh") # useful for decodeany
 
 def decodeany(data, format: str = 'PNG', returnImageObject: bool = False):
 
@@ -31,7 +33,10 @@ def decodeany(data, format: str = 'PNG', returnImageObject: bool = False):
             return decodeotab(data, format, returnImageObject) # assume otb if it doesnt look like a wbmp
 
         else:
-            raise Exception("This is definitely not an otb or wbmp")
+            try:
+                return decodebruh(data, format, returnImageObject) # bruh literally has no magic header its just 2 (u)int32s and ascii data
+            except Exception as e:
+                raise Exception(f"decoding failed! {e}. this likely means the format isnt supported by apftool.")
 
     else:
         raise Exception("Invalid data! Must be bytes or str")
