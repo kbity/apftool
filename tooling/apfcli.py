@@ -22,7 +22,7 @@ def main():
     ext = ext.lower()
     fbls = False
     legacy = False
-    trans = False
+    trans = 0
     forma = 'PNG'
     maxpalette = 95
     lineskip = 1
@@ -32,10 +32,12 @@ def main():
         if "--legacy" in args:
             legacy = True
         if "--transparent" in args:
-            trans = True
+            trans = 1
         for arg in args:
             if arg.startswith("--format="):
                 forma = arg.replace("--format=", "")
+            if arg.startswith("--transmode="):
+                trans = int(arg.replace("--transmode=", ""))
             if arg.startswith("--palette="):
                 maxpalette = int(arg.replace("--palette=", ""))
             if arg.startswith("--lineskip="):
