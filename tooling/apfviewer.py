@@ -4,9 +4,13 @@ from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
 from apftool import decodeany, extensions, extensions_wbmp, extensions_otab, extensions, extensions_all
 
+def close(event):
+    root.destroy()
+
 tupleware = []
 cf = 0
 limit = 0
+frametime = 50
 
 for ex in extensions:
     tupleware.append(('Aperture Image Format', ex))
@@ -38,6 +42,8 @@ if ext not in extensions:
 
 root = tk.Tk()
 root.title(f"{filename} - apfviewer")
+
+root.bind("<Escape>", close)
 
 with open(filename, "rb") as f:
     data = f.read()
