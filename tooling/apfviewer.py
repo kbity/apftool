@@ -33,17 +33,26 @@ if ext not in extensions:
     elif ext in extensions_all:
         pass
     else:
-        messagebox.showerror("Error", "Unsupported file, please use an APF, AF2, WBMP, or OTB Image.")
+        messagebox.showerror("Error", "Unsupported file, please use an APF, AF2, WBMP, OTB, or BRUH Image.")
         quit()
 
 root = tk.Tk()
 root.title(f"{filename} - apfviewer")
+
 with open(filename, "rb") as f:
     data = f.read()
 imgdat = decodeany(data, 'BRUH', True)
 
 if isinstance(imgdat, list):
     animated = True
+    frametime = data.decode('ascii')
+    frametime = frametime.splitlines()[1]
+    frametime = frametime.split(",")
+    if len(frametime) == 5:
+        frametime = frametime[4]
+        frametime = int(frametime)
+    else:
+        frametime = 100
 else:
     animated = False
     imgdat = [imgdat]
@@ -81,12 +90,12 @@ def animate():
     frame = scale_image(imgdat[cf], current_size)
 
     tk_image = ImageTk.PhotoImage(frame)
-    label.config(image=tk_image)
+    label.config(image=tk_image, bg='black')
     label.image = tk_image
 
     cf = (cf + 1) % limit
 
-    root.after(100, animate)
+    root.after(frametime, animate)
 
 
 # ---------- resize handling ----------
