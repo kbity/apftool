@@ -1,6 +1,6 @@
-# A library for converting to and from Aperture Science apf files, the custom extended apf2s, and otb/wbmp images.
+# A library for converting to and from Aperture Science apf files, the custom extended apf2s, otb/wbmp images, and facedev's bruh format.
 
-## usage: 
+## basic usage: 
 
 ```
 import apftool
@@ -8,6 +8,8 @@ import apftool
 apfString = apftool.encodeapf(pngObject) # turns image bytes object into apf string
 pngObject = apftool.decodeapf(apfString) # turns apf string object into image bytes
 ```
+
+additional tooling and software using apftool can be found at https://github.com/kbity/apftool, including custom MIME extensions.
 
 ## funcs and features
 
@@ -19,7 +21,9 @@ pngObject = apftool.decodeapf(apfString) # turns apf string object into image by
 
 `encodewbmp(img: Image)` takes pil image object and outputs wbmp bytes
 
-`encodeotab(img: Image, width=255, height=255)` takes pil image object and outputs otb bytes. max size is 255x255
+`encodeotab(img: Image, width=255, height=255)` takes pil image object and outputs otb bytes. max size is 255x255. the size input is max size, the output may be smaller
+
+`encodebruh(img: Image)` takes pil image object and outputs bruh bytes
 
 ### decoders:
 
@@ -32,6 +36,8 @@ pngObject = apftool.decodeapf(apfString) # turns apf string object into image by
 `decodewbmp(wbmp: bytes, format: str = 'PNG', returnImageObject: bool = False)` takes wbmp bytes and outputs either image bytes in specified format or pil image object
 
 `decodeotab(otab: bytes, format: str = 'PNG', returnImageObject: bool = False)` hi i have the same usage as decodewbmp but for .otb images
+
+`decodebruh(bruh: bytes, format: str = 'PNG', returnImageObject: bool = False)` bruh decoder, acts the same as the others.
 
 ### misc:
 
@@ -47,17 +53,27 @@ apftool provides many extensions tuples:
 
 `extensions_otab` - otb extensions
 
+`extensions_bruh` - bruh extensions
+
 `extensions_txt` - txt extensions, useful for weeding out generic apf
 
 `extensions_all` - all supported apftool extensions, useful for decodeany
 
 ## dependancies
 
-`PIL, io, textwrap, math` (apftool)
+`PIL (pillow)` is required
 
-most of these a builtins but you may need to install PIL seperately
+`numpy` and `scikit-learn` are needed for high-speed APF2-1994 257+ Color Encoding, if missing the code will use a very slow fallback.
 
 ## changelog:
+
+0.5.5 - implement apf2-1994 encoding and decoding
+
+0.5.2 - add bruh heristic to decodeany
+
+0.5.1 - attempt to fix bruh resolution parsing issue
+
+0.5.0 - add bruh encoder and decoder
 
 0.4.3 - actually improve otb quality
 
