@@ -784,19 +784,3 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
     apflist.append(output)
     apftext = "\n".join(apflist)
     return apftext
-
-file_path = 'ball.gif'
-with open(file_path, "rb") as f:
-    data = io.BytesIO()
-    data = f.read()
-
-encodedapf = encodeaf2(img=data, lineskip=1, findbestlineskip=False, legacy=False, trans=2, desc="Test Image for GIF Mode", pal = 9025)
-with open("ball.af2", "w") as f:
-    f.write(encodedapf)
-
-file_path = 'ball.af2'
-with open(file_path, 'r') as f:
-    file_content = f.read()
-decodedapf = decodeaf2(file_content)
-with open("ball-decoded.gif", "wb") as f:
-    f.write(decodedapf)

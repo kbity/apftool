@@ -67,7 +67,9 @@ apftool provides many extensions tuples:
 
 ## changelog:
 
-0.5.5 - implement apf2-1994 encoding and decoding
+0.5.6 - damn it i left the file testing code in af2tool
+
+0.5.5 - implement apf2-1994 encoding and decoding (broken release)
 
 0.5.2 - add bruh heristic to decodeany
 

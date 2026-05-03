@@ -29,14 +29,23 @@ def decodeany(data, format: str = 'PNG', returnImageObject: bool = False):
             apfX = data.decode("ascii")
             return decodeaf2(apfX, format, returnImageObject) # yeah ok vrumbler
 
+        # bruh heuristic: everything past the 8th byte should be text
+        datapast8th = data[8:]
+        bruh = False
+        try:
+            datapast8th.decode("ascii") # dont even need to keep this just discard it
+            bruh = True
+        except Exception:
+            pass
+
+        if bruh: # looser check that otbs follow
+            return decodebruh(data, format, returnImageObject) # assume otb if it doesnt look like a wbmp or doesnt taste like a bruh
+
         elif data.startswith(b'\x00'): # looser check that otbs follow
-            return decodeotab(data, format, returnImageObject) # assume otb if it doesnt look like a wbmp
+            return decodeotab(data, format, returnImageObject) # assume otb if it doesnt look like a wbmp or doesnt taste like a bruh
 
         else:
-            try:
-                return decodebruh(data, format, returnImageObject) # bruh literally has no magic header its just 2 (u)int32s and ascii data
-            except Exception as e:
-                raise Exception(f"decoding failed! {e}. this likely means the format isnt supported by apftool.")
+            Exception(f"decoding failed! {e}. this likely means the format isnt supported by apftool.")
 
     else:
         raise Exception("Invalid data! Must be bytes or str")
