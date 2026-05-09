@@ -201,7 +201,7 @@ def af2_1994_decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: in
             hexcsegment = textwrap.wrap(hexcs, 2)
             pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
-    if trans:
+    if trans == 1:
         pal["  "] = (0, 0, 0, 0)
 
     for pair in range(len(data)//3):

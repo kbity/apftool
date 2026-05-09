@@ -17,7 +17,7 @@ additional tooling and software using apftool can be found at https://github.com
 
 `encodeapf(img: bytes, lineskip: int = 1, findbestlineskip: bool = False)` takes image bytes and outputs apf string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the possible max of 199 and uses the smallest one.
 
-`encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans: bool = False, pal: int = 95)` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 1 color data instead of a 95 color palette. trans enables/disables transparency, which overrides a color. pal allows you to manually force a smaller palette.
+`encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = ""):` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode.
 
 `encodewbmp(img: Image)` takes pil image object and outputs wbmp bytes
 
@@ -66,6 +66,8 @@ apftool provides many extensions tuples:
 `numpy` and `scikit-learn` are needed for high-speed APF2-1994 257+ Color Encoding, if missing the code will use a very slow fallback.
 
 ## changelog:
+
+0.5.7 - fix index 0 bug with transparency mode 2 in 9025 color mode
 
 0.5.6 - damn it i left the file testing code in af2tool
 
