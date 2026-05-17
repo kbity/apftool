@@ -1,4 +1,4 @@
-apf2web is a Pillow-less port of apftool's af2decode function (APF2toPPM) but with the PPM replaced by a JavaScript Canvas.
+apf2web is a Pillow-less port of apftool's af2decode function (which was APF2toPPM.py) but with the PPM replaced by a JavaScript Canvas.
 
 Usage:
 * you must add `<script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>` to the top of the document
