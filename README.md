@@ -11,13 +11,23 @@ pngObject = apftool.decodeapf(apfString) # turns apf string object into image by
 
 additional tooling and software using apftool can be found at https://github.com/kbity/apftool, including custom MIME extensions.
 
+## format info:
+
+APF is a custom format made by valve for the Portal 2 ARG. Documentation can be found [here](http://portalwiki.asshatter.org/index.php/Aperture_Image_Format.html).
+
+APF2 is a custom format, and superset of the original Portal 2 ARG Format. Documentation for APF2 can be found [here](https://kbity.github.io/extra/apf2.html).
+
+wbmp (Wireless bitmap) and otb (over-the-air bitmap) are simple image formats meant for transfering images before the modern internet was available to cell phones. wbmp came from the WAP forum, and otb came from Nokia. Info can be found [here](https://en.wikipedia.org/wiki/Wireless_Application_Protocol_Bitmap_Format) and [here](https://en.wikipedia.org/wiki/OTA_bitmap) respectively.
+
+bruh is an intentionally terrible format made by facedev. info can be found [here](https://www.youtube.com/watch?v=48B8FPmMT0g)... i guess?
+
 ## funcs and features
 
 ### encoders:
 
 `encodeapf(img: bytes, lineskip: int = 1, findbestlineskip: bool = False)` takes image bytes and outputs apf string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the possible max of 199 and uses the smallest one.
 
-`encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = ""):` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode.
+`encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None):` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode. Prepalette is an already encoded APF2 palette you input into the encoder to make the colors deterministic.
 
 `encodewbmp(img: Image)` takes pil image object and outputs wbmp bytes
 
@@ -67,6 +77,20 @@ apftool provides many extensions tuples:
 
 ## changelog:
 
+0.5.14 - update apf/apf2 encoder and decoder to use union types
+
+0.5.13 - make the fixed palette thing not use a stupid amount of memory by using sklearn
+
+0.5.12 - fix encoder with bytes input comparing against literal "bytes" type
+
+0.5.11 - fix encoder trying to decode a non-existant input palette
+
+0.5.10 - add predefined palette input for encoding, and remove duplicated code in the decode data functions
+
+0.5.9 - fix wbmp encoding
+
+0.5.8 - improve encoding speed for apf2 and wbmp
+
 0.5.7 - fix index 0 bug with transparency mode 2 in 9025 color mode
 
 0.5.6 - damn it i left the file testing code in af2tool
@@ -94,3 +118,7 @@ apftool provides many extensions tuples:
 0.3.1 - fix 0.3.0
 
 0.3.0 - add support for wbmp images, broken release
+
+0.2.x - add apf2 support, i dont remember all the changes of the 0.2.x line
+
+0.10 - initial release

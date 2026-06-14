@@ -8,45 +8,60 @@ qmf = "basic"
 try:
     import numpy as np
     from sklearn.cluster import MiniBatchKMeans
+    from sklearn.metrics import pairwise_distances_argmin
     qmf = "sk"
 except Exception as e:
-    print(f"Importing sklearn.cluster.MiniBatchKMeans or numpy (np) failed, high-color images and images with alpha may encode slowly or not at all!\n{e}")
+    print(f"Importing sklearn or numpy failed, high-color images and images with alpha may encode slowly or not at all!\n{e}")
 
 # width and height are 320x200 for standard apf files
 af2headertext = "APERTURE IMAGE FORMAT (c) 1993" # af2 header
 af2headertext1994 = "APERTURE IMAGE FORMAT (c) 1994" # af2 header (1994 extensions of d, and a)
 
 # fast sklearn version
-def quantize_most_frequent_sk(img: Image.Image, n_colors: int):
+def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = None):
     img = img.convert("RGBA")
     arr = np.array(img, dtype=np.uint8)
     flat = arr.reshape(-1, 4).astype(np.float32)
 
-    kmeans = MiniBatchKMeans(
-        n_clusters=n_colors,
-        batch_size=10_000,
-        n_init="auto",
-        random_state=0
-    )
+    if palette is not None:
+        # ---- FIXED PALETTE MODE ----
+        palette_arr = np.array(palette, dtype=np.uint8)
 
-    labels = kmeans.fit_predict(flat)
-    palette = kmeans.cluster_centers_.astype(np.uint8)
+        # sklearn does the batching internally (no giant tensor)
+        labels = pairwise_distances_argmin(flat, palette_arr)
 
-    quantized = palette[labels].reshape(arr.shape)
+        quantized = palette_arr[labels].reshape(arr.shape)
 
-    palettet = [tuple(x) for x in palette]
-    return Image.fromarray(quantized, "RGBA"), palettet
+        palettet = [tuple(map(int, x)) for x in palette_arr]
+        return Image.fromarray(quantized, "RGBA"), palettet
+    else:
+        # ---- KMEANS MODE ----
+        kmeans = MiniBatchKMeans(
+            n_clusters=n_colors,
+            batch_size=10_000,
+            n_init="auto",
+            random_state=0
+        )
+
+        labels = kmeans.fit_predict(flat)
+        palette_arr = kmeans.cluster_centers_.astype(np.uint8)
+
+        quantized = palette_arr[labels].reshape(arr.shape)
+
+        palettet = [tuple(x) for x in palette_arr]
+        return Image.fromarray(quantized, "RGBA"), palettet
 
 # slow pure python version
-def quantize_most_frequent_basic(img: Image.Image, n_colors: int): # for use with A and P>256 images
+def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None): # for use with A and P>256 images
     img = img.convert("RGBA")  # ensures consistent format
     pixels = list(img.getdata())
 
-    # Count colors
-    counts = Counter(pixels)
-
-    # Take top N colors
-    palette = [color for color, _ in counts.most_common(n_colors)]
+    # do this if a palette is not provided
+    if not palette:
+        # Count colors
+        counts = Counter(pixels)
+        # Take top N colors
+        palette = [color for color, _ in counts.most_common(n_colors)]
 
     # Precompute for speed
     def dist2(c1, c2):
@@ -119,24 +134,9 @@ def af2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pal
     passoffset = 0
 
     # convert palette to dictionary tuples
-    seven = 7
-    if trans == 2:
-        seven = 9
+    istrans2 = bool(trans == 2)
 
-    palsegments = textwrap.wrap(pals, seven)
-    pal = {}
-    if trans == 2:
-        for col in palsegments:
-            ind = col[0]
-            hexcs = col[1:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
-    else:
-        for col in palsegments:
-            ind = col[0]
-            hexcs = col[1:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
+    pal = apf2palettedecode(pals, False, istrans2, False)
 
     if trans == 1:
         pal[" "] = (0, 0, 0, 0)
@@ -182,24 +182,9 @@ def af2_1994_decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: in
     passoffset = 0
 
     # convert palette to dictionary tuples
-    eight = 8
-    if trans == 2:
-        eight = 10
+    istrans2 = bool(trans == 2)
 
-    palsegments = [pals[i:i+eight] for i in range(0, len(pals), eight)] # text wrap strips whitespace in the middle of data
-    pal = {}
-    if trans == 2:
-        for col in palsegments:
-            ind = col[:2]
-            hexcs = col[2:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
-    else:
-        for col in palsegments:
-            ind = col[:2]
-            hexcs = col[2:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            pal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
+    pal = apf2palettedecode(pals, True, istrans2, False)
 
     if trans == 1:
         pal["  "] = (0, 0, 0, 0)
@@ -239,7 +224,10 @@ def af2_1994_decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: in
 
     return img
 
-def decodeaf2(af2: str, format: str = 'PNG', returnImageObject: bool = False):
+def decodeaf2(af2: str | bytes, format: str = 'PNG', returnImageObject: bool = False):
+    if type(af2) == bytes:
+        af2 = af2.decode("ascii")
+
     apf_list = af2.splitlines()
     apf_lines = []
     for line in apf_list:
@@ -375,7 +363,7 @@ def decodeaf2(af2: str, format: str = 'PNG', returnImageObject: bool = False):
             imageData = imageData.getvalue()
             return imageData
 
-def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0):
+def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None):
     trans = int(trans)
     if animated:
         # avoid expensive repeated hi-color quantize computing of every frame
@@ -438,8 +426,8 @@ def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = Fal
         
         return frames_p, palette, frametiming, trans
     else:
-        if trans == 2 or num_colors > 256:
-            img, palette = quantize_most_frequent(img, num_colors)
+        if trans == 2 or num_colors > 256 or prepalette:
+            img, palette = quantize_most_frequent(img, num_colors, prepalette)
             if trans != 2:
                 palette_na = []
                 for col in palette:
@@ -502,7 +490,7 @@ def generate_runs_af2_l(bitmap: list, lineskip: int, w: int, h: int):
         runlens.append(runcounter)
     return runlens
 
-def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False):
+def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False, prepalette: str = None):
     trans = int(trans)
     colpal = {}
     colpalbnr = {}
@@ -510,46 +498,64 @@ def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int
     if not (len(palette) == 95 or len(palette) == 9025):
         reservespace = True
 
-    if dim:
-        for i in range(0,len(palette)):
-            oi = i
-            if reservespace:
-                i+=1
-            pid = chr((i//95)+32)
-            pid += chr((i%95)+32)
-            colpal[pid] = palette[oi]
-    else:
-        for i in range(0,len(palette)):
-            colpal[chr(i+32+int(reservespace))] = palette[i]
+    if prepalette:
+        af2pal = prepalette
+        colpal = apf2palettedecode(prepalette, dim, bool(trans == 2), False)
 
-    if trans == 1:
-        for key in colpal:
-            kreisi = list(colpal[key])
-            kreisi.append(255)
-            kreisi = tuple(kreisi)
-            colpalbnr[kreisi] = key
-        if dim:
-            colpalbnr[(0, 0, 0, 0)] = "  "
-            colpalbnr[(255, 0, 255, 0)] = "  "
-        else:
-            colpalbnr[(0, 0, 0, 0)] = " "
-            colpalbnr[(255, 0, 255, 0)] = " "
-    else:
         for key in colpal:
             colpalbnr[colpal[key]] = key
 
-    af2pal_array = []
-    af2pal = ""
-    for col in colpal:
-        if trans == 2:
-            r, g, b, a = colpal[col]
-            liberal = (f"{r:02X}", f"{g:02X}", f"{b:02X}", f"{a:02X}")
-            af2pal_array.append(f"{col}{''.join(liberal)}")
+        if trans == 1:
+            if dim:
+                colpalbnr[(0, 0, 0, 0)] = "  "
+                colpalbnr[(255, 0, 255, 0)] = "  "
+            else:
+                colpalbnr[(0, 0, 0, 0)] = " "
+                colpalbnr[(255, 0, 255, 0)] = " "
+
+    else:
+        if dim:
+            for i in range(0,len(palette)):
+                oi = i
+                if reservespace:
+                    i+=1
+                pid = chr((i//95)+32)
+                pid += chr((i%95)+32)
+                colpal[pid] = palette[oi]
         else:
-            r, g, b = colpal[col]
-            liberal = (f"{r:02X}", f"{g:02X}", f"{b:02X}")
-            af2pal_array.append(f"{col}{''.join(liberal)}")
-    af2pal = ''.join(af2pal_array)
+            for i in range(0,len(palette)):
+                colpal[chr(i+32+int(reservespace))] = palette[i]
+
+        if trans == 1:
+            for key in colpal:
+                kreisi = list(colpal[key])
+                kreisi.append(255)
+                kreisi = tuple(kreisi)
+                colpalbnr[kreisi] = key
+            if dim:
+                colpalbnr[(0, 0, 0, 0)] = "  "
+                colpalbnr[(255, 0, 255, 0)] = "  "
+            else:
+                colpalbnr[(0, 0, 0, 0)] = " "
+                colpalbnr[(255, 0, 255, 0)] = " "
+        else:
+            for key in colpal:
+                colpalbnr[colpal[key]] = key
+
+        af2pal_array = []
+        af2pal = ""
+        for col in colpal:
+            if trans == 2:
+                r, g, b, a = colpal[col]
+                liberal = (f"{r:02X}", f"{g:02X}", f"{b:02X}", f"{a:02X}")
+                af2pal_array.append(f"{col}{''.join(liberal)}")
+            else:
+                r, g, b = colpal[col]
+                liberal = (f"{r:02X}", f"{g:02X}", f"{b:02X}")
+                af2pal_array.append(f"{col}{''.join(liberal)}")
+
+        af2pal = ''.join(af2pal_array)
+
     runcounter = 0
     currentrun = None
     runlens = []
@@ -594,8 +600,46 @@ def generate_runs_af2(bitmap: list, palette: list, lineskip: int, w: int, h: int
     total = sum(rldb)
     return runlens, af2pal
 
-def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = ""):
+def apf2palettedecode(pal: str, dim: bool = False, alpha: bool = False, dump: bool = True):
+    tupledump = []
+    statepal = {}
+    tullength = 7
+    il = 1
+    if alpha:
+        tullength += 2
+    if dim:
+        il = 2
+        tullength += 1
+
+    palsegments = [pal[i:i+tullength] for i in range(0, len(pal), tullength)]
+
+    if alpha:
+        for col in palsegments:
+            ind = col[:il]
+            hexcs = col[il:]
+            hexcsegment = textwrap.wrap(hexcs, 2)
+            if dump:
+                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16)))
+            else:
+                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
+    else:
+        for col in palsegments:
+            ind = col[:il]
+            hexcs = col[il:]
+            hexcsegment = textwrap.wrap(hexcs, 2)
+            if dump:
+                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16), 255))
+            else:
+                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
+
+    if dump:
+        return tupledump
+    else:
+        return statepal
+
+def encodeaf2(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None):
     frametiming = None
+    bakedpal = None
     dim = False
     trans = int(trans) # compatability filter
     if trans > 2:
@@ -606,17 +650,34 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
         if pal > 9025:
             raise Exception("Palette cannot be larger than 9025 colors!")
 
+    if legacy and prepalette:
+        raise Exception("Legacy mode cannot be used in conjunction with a pre-baked palette!")
+
+    if prepalette:
+        if dim:
+            if trans == 2:
+                bakedpal = apf2palettedecode(prepalette, True, True, True)
+            else:
+                bakedpal = apf2palettedecode(prepalette, True, False, True)
+        else:
+            if trans == 2:
+                bakedpal = apf2palettedecode(prepalette, False, True, True)
+            else:
+                bakedpal = apf2palettedecode(prepalette, False, False, True)
+
     if trans == 1 and (pal == 95):
         pal = 94
     if trans == 1 and (pal == 9025):
         pal = 9024
 
-    img = Image.open(io.BytesIO(img))
+    if type(img) == bytes:
+        img = Image.open(io.BytesIO(img))
+
     animated = getattr(img, "is_animated", False)
     if legacy:
         img, frametiming = reduce_to_apf_in_af2_quality(img, animated)
     else:
-        img, palette, frametiming, trans = reduce_to_af2_quality(img, pal, animated, trans)
+        img, palette, frametiming, trans = reduce_to_af2_quality(img, pal, animated, trans, bakedpal)
 
     imageData = io.StringIO()
     uses1994extensions = (trans == 2 or dim)
@@ -705,7 +766,7 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
             if legacy:
                 lens[ls] = generate_runs_af2_l(bitmap, int(ls), w, h)
             else:
-                lens[ls], af2pal = generate_runs_af2(bitmap, palette, int(ls), w, h, trans, dim)
+                lens[ls], af2pal = generate_runs_af2(bitmap, palette, int(ls), w, h, trans, dim, prepalette)
         for ls in lens:
             totallen = len(lens[ls])+len(str(ls))
             if totallen < shortestlen:
@@ -715,12 +776,20 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
         metadata.append(str(shortestId))
 
         if legacy:
+            temp = []
             af2pal = "."
             for num in runlens:
-                output += chr(num+32)
+                temp.append(chr(num+32))
+            output = "".join(temp)
+            temp = None
         else:
+            temp = []
             for num in runlens:
-                output += num[0]+chr(num[1]+32)
+                temp.append(num[0])
+                temp.append(chr(num[1]+32))
+            output = "".join(temp)
+            temp = None
+
         if trans == 1 and not legacy:
             if dim:
                 af2pal = "  FF00FF"+af2pal
@@ -731,21 +800,26 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
             if legacy:
                 outputs = []
                 for bitmap in bitmaps:
-                    temp = ""
+                    temp = []
                     runlens = generate_runs_af2_l(bitmap, lineskip, w, h)
                     for num in runlens:
-                        temp += chr(num+32)
-                    outputs.append(temp)
+                        temp.append(chr(num+32))
+                    tempstr = "".join(temp)
+                    temp = None
+                    outputs.append(tempstr)
                 output = "\n".join(outputs)
             else:
                 outputs = []
-                _, af2pal = generate_runs_af2(bitmaps[0], palette, lineskip, w, h, trans, dim)
+                _, af2pal = generate_runs_af2(bitmaps[0], palette, lineskip, w, h, trans, dim, prepalette)
                 for bitmap in bitmaps:
-                    temp = ""
-                    runlens, _ = generate_runs_af2(bitmap, palette, lineskip, w, h, trans, dim)
+                    temp = []
+                    runlens, _ = generate_runs_af2(bitmap, palette, lineskip, w, h, trans, dim, prepalette)
                     for num in runlens:
-                        temp += num[0]+chr(num[1]+32)
-                    outputs.append(temp)
+                        temp.append(num[0])
+                        temp.append(chr(num[1]+32))
+                    tempstr = "".join(temp)
+                    temp = None
+                    outputs.append(tempstr)
 
                 output = "\n".join(outputs)
 
@@ -757,17 +831,24 @@ def encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, leg
         else:
             if legacy:
                 runlens = generate_runs_af2_l(bitmap, lineskip, w, h)
+                temp = []
                 for num in runlens:
-                    output += chr(num+32)
+                    temp.append(chr(num+32))
+                output = "".join(temp)
+                temp = None
             else:
-                runlens, af2pal = generate_runs_af2(bitmap, palette, lineskip, w, h, trans, dim)
+                runlens, af2pal = generate_runs_af2(bitmap, palette, lineskip, w, h, trans, dim, prepalette)
                 if trans == 1 and not legacy:
                     if dim:
                         af2pal = "  FF00FF"+af2pal
                     else:
                         af2pal = " FF00FF"+af2pal # this is for decoders without transparency support
+                temp = []
                 for num in runlens:
-                    output += num[0]+chr(num[1]+32)
+                    temp.append(num[0])
+                    temp.append(chr(num[1]+32))
+                output = "".join(temp)
+                temp = None
     if desc or frametiming:
         metadata.append(desc)
     if frametiming:

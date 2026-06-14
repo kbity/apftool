@@ -6,7 +6,10 @@ w = 320
 h = 200
 headertext = "APERTURE IMAGE FORMAT (c) 1985" # header may change for alternate variations with different resolutions
 
-def decodeapf(apf: str, format: str = 'PNG', returnImageObject: bool = False):
+def decodeapf(apf: str | bytes, format: str = 'PNG', returnImageObject: bool = False):
+    if type(apf) == bytes:
+        apf = apf.decode("ascii")
+
     apf_list = apf.splitlines()
     apf_lines = []
     for line in apf_list:
@@ -101,8 +104,10 @@ def generate_runs(bitmap: list, lineskip: int):
         runlens.append(runcounter)
     return runlens
 
-def encodeapf(img: bytes, lineskip: int = 1, findbestlineskip: bool = False):
-    img = Image.open(io.BytesIO(img))
+def encodeapf(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False):
+    if type(img) == bytes:
+        img = Image.open(io.BytesIO(img))
+
     img = reduce_to_apf_quality(img)
     imageData = io.StringIO()
     apflist = [headertext]

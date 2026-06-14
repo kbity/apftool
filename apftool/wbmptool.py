@@ -1,15 +1,27 @@
 import io, textwrap, os, math
 from PIL import Image, ImageSequence, ImageOps
 
-def bitstring_to_bytes(s):
-    s = s.replace(" ", "")
-    s = s.replace(",", "")
-    s = s.replace("_", "")
-    return int(s, 2).to_bytes((len(s) + 7) // 8, byteorder='big')
-
-def bitstring_to_int(s):
-    s = s.replace(" ", "").replace(",", "").replace("_", "")
-    return int(s, 2)
+def boollist_to_int(s):
+    if not len(s) == 8:
+        raise Exception("Invalid boollist")
+    val = 0
+    if s[0]:
+        val += 128
+    if s[1]:
+        val += 64
+    if s[2]:
+        val += 32
+    if s[3]:
+        val += 16
+    if s[4]:
+        val += 8
+    if s[5]:
+        val += 4
+    if s[6]:
+        val += 2
+    if s[7]:
+        val += 1
+    return val
     
 def mk_uintvar(num: int):
     chunks = []
@@ -42,30 +54,31 @@ def encodewbmp(img: Image):
     height = res[1]
     payload += mk_uintvar(width)
     payload += mk_uintvar(height)
+    payload = bytearray(payload)
     #print(f"header: {payload.hex()}")
     bitmap = [[pixels[x, y] for x in range(img.width)] for y in range(img.height)]
 
-    collection = ""
+    collection = []
     cat = 0
     for hline in bitmap:
         for px in hline:
             cat += 1
             if px:
-                collection += "1"
+                collection.append(True)
             else:
-                collection += "0"
+                collection.append(False)
             if len(collection) == 8:
-                payload += bitstring_to_bytes(collection)
-                collection = ""
+                payload.append(boollist_to_int(collection))
+                collection = []
             if cat == width:
                 if collection:
                     while len(collection) < 8:
-                        collection += "0"
-                    payload += bitstring_to_bytes(collection)
-                    collection = ""
+                        collection.append(False)
+                    payload.append(boollist_to_int(collection))
+                    collection = []
                     cat = 0
 
-    return payload
+    return bytes(payload)
 
 def tonearest8(i: int):
     while not (i%8 == 0):
