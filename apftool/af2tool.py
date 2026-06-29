@@ -11,14 +11,14 @@ try:
     from sklearn.metrics import pairwise_distances_argmin
     qmf = "sk"
 except Exception as e:
-    print(f"Importing sklearn or numpy failed, high-color images and images with alpha may encode slowly or not at all!\n{e}")
+    print(f"Importing sklearn or numpy failed, high-color images and images with alpha may encode slowly or not at all, and dithering will be unavailable for them!\n{e}")
 
 # width and height are 320x200 for standard apf files
 af2headertext = "APERTURE IMAGE FORMAT (c) 1993" # af2 header
 af2headertext1994 = "APERTURE IMAGE FORMAT (c) 1994" # af2 header (1994 extensions of d, and a)
 
 # fast sklearn version
-def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = None):
+def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False):
     img = img.convert("RGBA")
     arr = np.array(img, dtype=np.uint8)
     flat = arr.reshape(-1, 4).astype(np.float32)
@@ -26,14 +26,6 @@ def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = N
     if palette is not None:
         # ---- FIXED PALETTE MODE ----
         palette_arr = np.array(palette, dtype=np.uint8)
-
-        # sklearn does the batching internally (no giant tensor)
-        labels = pairwise_distances_argmin(flat, palette_arr)
-
-        quantized = palette_arr[labels].reshape(arr.shape)
-
-        palettet = [tuple(map(int, x)) for x in palette_arr]
-        return Image.fromarray(quantized, "RGBA"), palettet
     else:
         # ---- KMEANS MODE ----
         kmeans = MiniBatchKMeans(
@@ -42,17 +34,56 @@ def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = N
             n_init="auto",
             random_state=0
         )
-
-        labels = kmeans.fit_predict(flat)
+        kmeans.fit(flat)
         palette_arr = kmeans.cluster_centers_.astype(np.uint8)
 
+    if dither:
+        # Floyd-Steinberg dithering — operate on a float copy to accumulate error
+        h, w = arr.shape[:2]
+        buf = arr.astype(np.float32)  # (H, W, 4)
+
+        out_indices = np.empty((h, w), dtype=np.int32)
+
+        for y in range(h):
+            # Serpentine scan (alternating direction) reduces directional bias
+            xs = range(w) if y % 2 == 0 else range(w - 1, -1, -1)
+            for x in xs:
+                old = buf[y, x]
+                idx = pairwise_distances_argmin(old[np.newaxis], palette_arr)[0]
+                out_indices[y, x] = idx
+                new = palette_arr[idx].astype(np.float32)
+                err = old - new
+
+                # Distribute error to 4 neighbours (Floyd-Steinberg weights)
+                if y % 2 == 0:  # left-to-right
+                    if x + 1 < w:
+                        buf[y,     x + 1] += err * (7 / 16)
+                    if y + 1 < h:
+                        if x - 1 >= 0:
+                            buf[y + 1, x - 1] += err * (3 / 16)
+                        buf[y + 1, x    ] += err * (5 / 16)
+                        if x + 1 < w:
+                            buf[y + 1, x + 1] += err * (1 / 16)
+                else:           # right-to-left
+                    if x - 1 >= 0:
+                        buf[y,     x - 1] += err * (7 / 16)
+                    if y + 1 < h:
+                        if x + 1 < w:
+                            buf[y + 1, x + 1] += err * (3 / 16)
+                        buf[y + 1, x    ] += err * (5 / 16)
+                        if x - 1 >= 0:
+                            buf[y + 1, x - 1] += err * (1 / 16)
+
+        quantized = palette_arr[out_indices].reshape(arr.shape)
+    else:
+        labels = pairwise_distances_argmin(flat, palette_arr)
         quantized = palette_arr[labels].reshape(arr.shape)
 
-        palettet = [tuple(x) for x in palette_arr]
-        return Image.fromarray(quantized, "RGBA"), palettet
+    palette_out = [tuple(map(int, x)) for x in palette_arr]
+    return Image.fromarray(quantized, "RGBA"), palette_out
 
 # slow pure python version
-def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None): # for use with A and P>256 images
+def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False): # for use with A and P>256 images, dithering unsupported for basic mode
     img = img.convert("RGBA")  # ensures consistent format
     pixels = list(img.getdata())
 
@@ -363,7 +394,7 @@ def decodeaf2(af2: str | bytes, format: str = 'PNG', returnImageObject: bool = F
             imageData = imageData.getvalue()
             return imageData
 
-def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None):
+def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None, dodithering: bool = False):
     trans = int(trans)
     if animated:
         # avoid expensive repeated hi-color quantize computing of every frame
@@ -374,6 +405,8 @@ def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = Fal
             if trans:
                 num_colors = 255
             print("Animation Detected, capping colors to 255/256")
+        if dodithering:
+            print("Animated APF2s do not get dithered, sorry.")
 
         ifuckinghatequantize = (255, 0, 255)
 
@@ -412,7 +445,7 @@ def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = Fal
             combined_p.putpalette(pal)
         else:
             combined_p = combined.convert("P", palette=Image.ADAPTIVE, colors=num_colors-1, dither=Image.NONE)
-        
+
         frames_p = []
         for frame in frames:
             f_p = frame.quantize(palette=combined_p, dither=Image.NONE)
@@ -423,19 +456,23 @@ def reduce_to_af2_quality(img: Image, num_colors: int = 95, animated: bool = Fal
         raw_palette = combined_p.getpalette()[:num_colors*3]
         seen = set()
         palette = [tuple(raw_palette[i:i+3]) for i in range(0, len(raw_palette), 3) if not (tuple(raw_palette[i:i+3]) in seen or seen.add(tuple(raw_palette[i:i+3])))]
-        
+
         return frames_p, palette, frametiming, trans
     else:
         if trans == 2 or num_colors > 256 or prepalette:
-            img, palette = quantize_most_frequent(img, num_colors, prepalette)
+            img, palette = quantize_most_frequent(img, num_colors, prepalette, dodithering)
             if trans != 2:
                 palette_na = []
                 for col in palette:
                     palette_na.append((col[0], col[1], col[2]))
                 palette = palette_na
         else:
-            img = img.convert("P", palette=Image.ADAPTIVE, colors=num_colors, dither=Image.NONE) # disable dithering to reduce file sizes
-    
+            if dodithering:
+                pal = img.quantize(num_colors)
+                img = img.quantize(num_colors, palette=pal, dither=Image.FLOYDSTEINBERG)
+            else:
+                img = img.convert("P", palette=Image.ADAPTIVE, colors=num_colors, dither=Image.NONE) # disable dithering to reduce file sizes
+
             # get the palette as tuples
             raw_palette = img.getpalette()[:num_colors*3]
             seen = set()
@@ -637,7 +674,7 @@ def apf2palettedecode(pal: str, dim: bool = False, alpha: bool = False, dump: bo
     else:
         return statepal
 
-def encodeaf2(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None):
+def encodeaf2(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False):
     frametiming = None
     bakedpal = None
     dim = False
@@ -677,7 +714,7 @@ def encodeaf2(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: boo
     if legacy:
         img, frametiming = reduce_to_apf_in_af2_quality(img, animated)
     else:
-        img, palette, frametiming, trans = reduce_to_af2_quality(img, pal, animated, trans, bakedpal)
+        img, palette, frametiming, trans = reduce_to_af2_quality(img, pal, animated, trans, bakedpal, dodithering)
 
     imageData = io.StringIO()
     uses1994extensions = (trans == 2 or dim)
