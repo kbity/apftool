@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "apftool"
-version = "0.5.15"
+version = "0.5.16"
 description = "Encoder and decoder for Aperture Science Image Format (apf), Aperture Science Image Format 2 (apf2), Wireless Bitmap (wbmp), Over-The-Air Bitmap (otb), and FaceDev's .bruh format"
 authors = [{name = "Mari (kbity)"}]
 readme = "README.md"
@@ -12,4 +12,4 @@ requires-python = ">=3.10"
 dependencies = ["Pillow"]
 
 [project.scripts]
-apftool = "apfcli:main"
+apfcli = "apftool:cli"

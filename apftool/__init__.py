@@ -1,10 +1,11 @@
 # apftool/__init__.py
 
 from .apftool import encodeapf, decodeapf
-from .af2tool import encodeaf2, decodeaf2
+from .apf2tool import encodeaf2, decodeaf2, encodeapf2, decodeapf2
 from .wbmptool import encodewbmp, decodewbmp
 from .otabtool import encodeotab, decodeotab
 from .bruhtool import encodebruh, decodebruh
+from .apfcli import main as cli
 
 extensions = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".txt", ".text")
 extensions_apf = (".apf", ".aif", ".txt", ".text")

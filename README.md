@@ -27,7 +27,7 @@ bruh is an intentionally terrible format made by facedev. info can be found [her
 
 `encodeapf(img: bytes, lineskip: int = 1, findbestlineskip: bool = False)` takes image bytes and outputs apf string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the possible max of 199 and uses the smallest one.
 
-`encodeaf2(img: bytes, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None):` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode. Prepalette is an already encoded APF2 palette you input into the encoder to make the colors deterministic.
+`def encodeapf2(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False)` takes image bytes and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode. Prepalette is an already encoded APF2 palette you input into the encoder to make the colors deterministic. dodithering enables or disables dithering.
 
 `encodewbmp(img: Image)` takes pil image object and outputs wbmp bytes
 
@@ -41,7 +41,7 @@ bruh is an intentionally terrible format made by facedev. info can be found [her
 
 `decodeapf(apf: str, format: str = 'PNG', returnImageObject: bool = False)` takes apf string and outputs either image bytes in specified format or pil image object
 
-`decodeaf2(af2: str, format: str = 'PNG', returnImageObject: bool = False)` hi i am the same thing, i am literally a dropin replacement for decodeapf too
+`decodeapf2(af2: str, format: str = 'PNG', returnImageObject: bool = False)` hi i am the same thing, i am literally a dropin replacement for decodeapf too
 
 `decodewbmp(wbmp: bytes, format: str = 'PNG', returnImageObject: bool = False)` takes wbmp bytes and outputs either image bytes in specified format or pil image object
 
@@ -76,6 +76,10 @@ apftool provides many extensions tuples:
 `numpy` and `scikit-learn` are needed for high-speed APF2-1994 257+ Color Encoding, if missing the code will use a very slow fallback.
 
 ## changelog:
+
+0.5.16 - add apfcli to the main project, fix dithering, fix palette edge cases, and rename encodeaf2 and decodeaf2 to encodeapf2 and decodeapf2
+
+0.5.15 - add option to toggle dithering to the apf2 encoder and decoder
 
 0.5.14 - update apf/apf2 encoder and decoder to use union types
 
