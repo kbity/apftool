@@ -7,7 +7,6 @@
       <match value="APERTURE IMAGE FORMAT (c) 1985" type="string" offset="0" />
     </magic>
   </mime-type>
-
   
   <mime-type type="image/x-aperture-picture-1993">
     <comment>Aperture Picture Format 2 image</comment>
@@ -33,6 +32,20 @@
   <mime-type type="image/x-bruhiff">
     <comment>Blazingly rapid uncompressed harebrained image</comment>
     <glob pattern="*.bruh"/>
+  </mime-type>
+  
+  <mime-type type="image/x-mqif">
+    <comment>Mari's QOI-Like Interchange Format image</comment>
+    <magic priority="100">
+      <match value="QIF26a" type="string" offset="0" />
+    </magic>
+  </mime-type>
+
+  <mime-type type="image/x-kqi">
+    <comment>KQ image</comment>
+    <magic priority="100">
+      <match value="KQIF" type="string" offset="0" />
+    </magic>
   </mime-type>
 
 </mime-info>
