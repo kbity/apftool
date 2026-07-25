@@ -3,6 +3,7 @@
 
   <mime-type type="image/x-aperture-picture">
     <comment>Aperture Picture Format image</comment>
+    <glob pattern="*.apf"/>
     <magic priority="100">
       <match value="APERTURE IMAGE FORMAT (c) 1985" type="string" offset="0" />
     </magic>
@@ -10,6 +11,9 @@
   
   <mime-type type="image/x-aperture-picture-1993">
     <comment>Aperture Picture Format 2 image</comment>
+    <glob pattern="*.apf2"/>
+    <glob pattern="*.af2"/>
+    <glob pattern="*.aif2"/>
     <magic priority="100">
       <match value="APERTURE IMAGE FORMAT (c) 1993" type="string" offset="0" />
     </magic>
@@ -17,6 +21,9 @@
 
   <mime-type type="image/x-aperture-picture-1994">
     <comment>Aperture Picture Format 2 (1994) image</comment>
+    <glob pattern="*.apf2"/>
+    <glob pattern="*.af2"/>
+    <glob pattern="*.aif2"/>
     <magic priority="100">
       <match value="APERTURE IMAGE FORMAT (c) 1994" type="string" offset="0" />
     </magic>
@@ -36,6 +43,8 @@
   
   <mime-type type="image/x-mqif">
     <comment>Mari's QOI-Like Interchange Format image</comment>
+    <glob pattern="*.mqif"/>
+    <glob pattern="*.mqi"/>
     <magic priority="100">
       <match value="QIF26a" type="string" offset="0" />
     </magic>
@@ -43,9 +52,20 @@
 
   <mime-type type="image/x-kqi">
     <comment>KQ image</comment>
+    <glob pattern="*.kqi"/>
     <magic priority="100">
       <match value="KQIF" type="string" offset="0" />
     </magic>
   </mime-type>
+
+  <mime-type type="image/x-flif">
+    <comment>FLIF image</comment>
+    <glob pattern="*.flif"/>
+    <glob pattern="*.flf"/>
+    <magic priority="100">
+      <match value="FLIF" type="string" offset="0" />
+    </magic>
+  </mime-type>
+
 
 </mime-info>
