@@ -14,7 +14,7 @@
     <glob pattern="*.apf2"/>
     <glob pattern="*.af2"/>
     <glob pattern="*.aif2"/>
-    <magic priority="100">
+    <magic priority="80">
       <match value="APERTURE IMAGE FORMAT (c) 1993" type="string" offset="0" />
     </magic>
   </mime-type>
@@ -24,8 +24,17 @@
     <glob pattern="*.apf2"/>
     <glob pattern="*.af2"/>
     <glob pattern="*.aif2"/>
-    <magic priority="100">
+    <magic priority="90">
       <match value="APERTURE IMAGE FORMAT (c) 1994" type="string" offset="0" />
+    </magic>
+  </mime-type>
+
+  <mime-type type="image/x-aperture-picture-2000">
+    <comment>Aperture Picture Format 2 (2000) image</comment>
+    <glob pattern="*.a2k"/>
+    <glob pattern="*.apf2"/>
+    <magic priority="100">
+      <match value="APERTURE IMAGE FORMAT (c) 2000" type="string" offset="0" />
     </magic>
   </mime-type>
 
