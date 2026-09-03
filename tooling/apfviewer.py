@@ -2,7 +2,7 @@ import PIL, sys, os, io
 import tkinter as tk
 from tkinter import filedialog, messagebox
 from PIL import Image, ImageTk
-from apftool import decodeany, extensions, extensions_wbmp, extensions_otab, extensions, extensions_all
+from apftool import decodeany, extensions, extensions_wbmp, extensions_otb, extensions_bruh, extensions_mqif, extensions, extensions_all
 
 def close(event):
     root.destroy()
@@ -10,14 +10,18 @@ def close(event):
 tupleware = []
 cf = 0
 limit = 0
-frametime = 50
+frametime = []
 
 for ex in extensions:
-    tupleware.append(('Aperture Image Format', ex))
+    tupleware.append(('Aperture Image Format 2', ex))
 for ex in extensions_wbmp:
     tupleware.append(('Wireless Bitmap', ex))
-for ex in extensions_otab:
+for ex in extensions_otb:
     tupleware.append(('Over The Air Bitmap', ex))
+for ex in extensions_bruh:
+    tupleware.append(('Blazingly apid Uncompressed Harebrained Image File Format', ex))
+for ex in extensions_mqif:
+    tupleware.append(('Mari\'s QOI-Like Interchange Format', ex))
 tupleware = tuple(tupleware)
 
 if len(sys.argv) < 2:
@@ -32,7 +36,7 @@ base, ext = os.path.splitext(filename)
 
 wbmp = False
 if ext not in extensions:
-    if ext in extensions_wbmp or ext in extensions_otab:
+    if ext in extensions_wbmp or ext in extensions_otb:
         wbmp = True
     elif ext in extensions_all:
         pass
@@ -47,21 +51,24 @@ root.bind("<Escape>", close)
 
 with open(filename, "rb") as f:
     data = f.read()
-imgdat = decodeany(data, 'BRUH', True)
+imgdat_2 = decodeany(data, 'BRUH', True, True)
 
-if isinstance(imgdat, list):
+if isinstance(imgdat_2, tuple):
     animated = True
-    frametime = data.decode('ascii')
-    frametime = frametime.splitlines()[1]
-    frametime = frametime.split(",")
-    if len(frametime) == 5:
-        frametime = frametime[4]
-        frametime = int(frametime)
+    imgdat = imgdat_2[0]
+    ft = imgdat_2[1]
+    if isinstance(ft, int):
+        for _ in imgdat:
+            frametime.append(ft)
     else:
-        frametime = 100
+        frametime = ft
+    if not isinstance(imgdat, list):
+        imgdat = [imgdat]
+        frametime = [50]
 else:
     animated = False
-    imgdat = [imgdat]
+    frametime = [50]
+    imgdat = [imgdat_2]
     if wbmp:
         imgdat = [img.point(lambda p: 0 if p == 0 else 255) for img in imgdat]
 
@@ -101,7 +108,7 @@ def animate():
 
     cf = (cf + 1) % limit
 
-    root.after(frametime, animate)
+    root.after(frametime[cf], animate)
 
 
 # ---------- resize handling ----------
