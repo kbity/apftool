@@ -16,6 +16,16 @@ except Exception as e:
 # width and height are 320x200 for standard apf files
 apf2headertext = "APERTURE IMAGE FORMAT (c) 1993" # apf2 header
 apf2headertext1994 = "APERTURE IMAGE FORMAT (c) 1994" # apf2 header (1994 extensions of d, and a)
+apf2headertext2000 = "APERTURE IMAGE FORMAT (c) 2000" # a2k header (2000 extensions of c, and u, U, A, T, n, q)
+
+# precompute lookup table for base256-to-base95
+def quant_to_base95(g: int):
+    X = 255/94
+    return round(g/X)
+
+mapping = []
+for i in range(256):
+    mapping.append(chr(quant_to_base95(i)+32))
 
 # fast sklearn version
 def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False):
@@ -122,9 +132,31 @@ if qmf == "sk":
 else:
     quantize_most_frequent = quantize_most_frequent_basic
 
-def apf2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: list, trans: bool = False):
+# splits apf2 data into the datapoints.
+def split_datapoints(data: str, datlen: int):
+    leng = len(data)
+
+    trunc = False
+    if not leng%datlen == 0:
+        print("Error: Data must be divisible by the apf2 segment length! Attempting decode anyways...")
+        trunc = True
+
+    split_points = []
+
+    for n in range(0, leng, datlen):
+        split_points.append(data[n:(n+datlen)])
+
+    if trunc:
+        split_points.pop(-1)
+
+    return split_points
+
+def apf2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: list, trans: bool = False, topdown: bool = False):
     x = 0
-    y = h-1
+    if topdown:
+        y = 0
+    else:
+        y = h-1
     passoffset = 0
     state = False # swapping this will invert the image.
 
@@ -134,13 +166,24 @@ def apf2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int
             if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
                 apfbuffer[y][x] = (state)
             x += 1
-            if not x < w:
-                y = y - lineskip
-                x = 0
-            if y < 0:
-                y = h-1
-                passoffset +=1
-                y -= passoffset
+
+            if topdown:
+                if x >= w:
+                    y += lineskip
+                    x = 0
+
+                if y >= h:
+                    passoffset +=1
+                    y = passoffset
+            else:
+                if x >= w:
+                    y -= lineskip
+                    x = 0
+
+                if y < 0:
+                    passoffset +=1
+                    y = (h-1)-passoffset
+
         state = not state
 
     colmode = "RGB"
@@ -159,36 +202,117 @@ def apf2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int
                 pixels[x, y] = pals[0]
     return img
 
-def apf2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: str, trans = 0):
+def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
+    # 3 - near-truecolor
+    # 4 - near-truecolor with alpha
+    # 5 - truecolor (can be paired with t to store 3 levels of alpha)
+    # 6 - truecolor with alpha
+    if mode == 3:
+        r = mapping.index(inpt[0])
+        g = mapping.index(inpt[1])
+        b = mapping.index(inpt[2])
+        return r, g, b
+
+    elif mode == 4:
+        r = mapping.index(inpt[0])
+        g = mapping.index(inpt[1])
+        b = mapping.index(inpt[2])
+        a = mapping.index(inpt[3])
+        return r, g, b, a
+
+    elif mode == 5:
+        r = mapping.index(inpt[0])
+        g = mapping.index(inpt[1])
+        b = mapping.index(inpt[2])
+
+        # compute corrections
+        c = ord(inpt[3])-32
+        rc = c%3
+        gc = (c//3)%3
+        bc = (c//9)%3
+        ac = (c//27)%3
+
+        if trans:
+            return r+rc, g+gc, b+bc, (0, 128, 255)[ac]
+        else:
+            return r+rc, g+gc, b+bc
+
+    elif mode == 6:
+        r = mapping.index(inpt[0])
+        g = mapping.index(inpt[1])
+        b = mapping.index(inpt[2])
+        a = mapping.index(inpt[3])
+
+        # compute corrections
+        c = ord(inpt[4])-32
+        rc = c%3
+        gc = (c//3)%3
+        bc = (c//9)%3
+        ac = (c//27)%3
+
+        return r+rc, g+gc, b+bc, a+ac
+    else:
+        raise ValueError("Invalid/Unsupported Mode")
+
+def apf2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: str, trans = 0, splitlen: int = 2, uncompressed: bool = False, mode: int = 1, topdown: bool = False):
     x = 0
-    y = h-1
+    if topdown:
+        y = 0
+    else:
+        y = h-1
     passoffset = 0
 
     # convert palette to dictionary tuples
     istrans2 = bool(trans == 2)
 
-    pal = apf2palettedecode(pals, False, istrans2, False)
+    flexMode = mode > 2 and mode < 7
+    graymode = mode > 6
 
-    if trans == 1:
-        pal[" "] = (0, 0, 0, 0)
+    if not flexMode and not graymode:
+        pal = apf2palettedecode(pals, bool(mode-1), istrans2, False)
+        if trans == 1:
+            pal[" "*mode] = (0, 0, 0, 0)
 
-    for pair in range(len(data)//2):
-        color = data[pair*2]
-        runlen = ord(data[pair*2+1]) - 32
+    if graymode:
+        if mode == 7:
+            pal = graypal(False)
+        else:
+            pal = graypal(True)
+
+    cdpts = split_datapoints(data, splitlen)
+
+    for point in cdpts:
+        if uncompressed:
+            color = point
+            runlen = 1
+        else:
+            color = point[:-1]
+            runlen = ord(point[-1]) - 32
 
         for i in range(runlen):
             if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
-                apfbuffer[y][x] = pal[color]
+                if flexMode:
+                    apfbuffer[y][x] = flexTypeToRGB(color, mode, bool(trans))
+                else:
+                    apfbuffer[y][x] = pal[color]
 
             x += 1
-            if x >= w:
-                y -= lineskip
-                x = 0
+            if topdown:
+                if x >= w:
+                    y += lineskip
+                    x = 0
 
-            if y < 0:
-                y = h-1
-                passoffset += 1
-                y -= passoffset
+                if y >= h:
+                    passoffset +=1
+                    y = passoffset
+            else:
+                if x >= w:
+                    y -= lineskip
+                    x = 0
+
+                if y < 0:
+                    passoffset +=1
+                    y = (h-1)-passoffset
 
     colmode = "RGB"
     if trans:
@@ -207,55 +331,109 @@ def apf2decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pa
 
     return img
 
-def apf2_1994_decodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: str, trans = 0):
-    x = 0
-    y = h-1
-    passoffset = 0
+def apf2palettedecode(pal: str, dim: bool = False, alpha: bool = False, dump: bool = True):
+    tupledump = []
+    statepal = {}
+    tullength = 7
+    il = 1
+    if alpha:
+        tullength += 2
+    if dim:
+        il = 2
+        tullength += 1
 
-    # convert palette to dictionary tuples
-    istrans2 = bool(trans == 2)
+    palsegments = [pal[i:i+tullength] for i in range(0, len(pal), tullength)]
 
-    pal = apf2palettedecode(pals, True, istrans2, False)
-
-    if trans == 1:
-        pal["  "] = (0, 0, 0, 0)
-
-    for pair in range(len(data)//3):
-        color = data[pair*3]+data[(pair*3)+1]
-        runlen = ord(data[pair*3+2]) - 32
-
-        for i in range(runlen):
-            if 0 <= y < len(apfbuffer) and 0 <= x < len(apfbuffer[0]):
-                apfbuffer[y][x] = pal[color]
-
-            x += 1
-            if x >= w:
-                y -= lineskip
-                x = 0
-
-            if y < 0:
-                y = h-1
-                passoffset += 1
-                y -= passoffset
-
-    colmode = "RGB"
-    if trans:
-        colmode+="A"
-    img = Image.new(colmode, (w, h))
-    pixels = img.load()
-
-    for y in range(h):
-        row = apfbuffer[y]
-
-        for x in range(w):
-            if not row[x]:
-                pixels[x, y] = (255,0,255)
+    if alpha:
+        for col in palsegments:
+            ind = col[:il]
+            hexcs = col[il:]
+            hexcsegment = textwrap.wrap(hexcs, 2)
+            if dump:
+                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16)))
             else:
-                pixels[x, y] = row[x]
+                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
+    else:
+        for col in palsegments:
+            ind = col[:il]
+            hexcs = col[il:]
+            hexcsegment = textwrap.wrap(hexcs, 2)
+            if dump:
+                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16), 255))
+            else:
+                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
-    return img
+    if dump:
+        return tupledump
+    else:
+        return statepal
 
-def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = False, provide_extra_data: bool = False):
+def graypal(perfect: bool = False):
+    pal = {}
+    if perfect:
+        for n in range(256):
+            i0 = n%95
+            i1 = n//95
+            ind = chr(i1+32)+chr(i0+32)
+            pal[ind] = (n, n, n)
+    else:
+        for n in set(mapping):
+            if not n in pal:
+                pal[n] = (mapping.index(n), mapping.index(n), mapping.index(n))
+    return pal
+
+def int_alpha_composit(l1: tuple, l2: tuple):
+    # l1 is bottom, l2 is top
+    a1 = l1[3]
+    a2 = l2[3]
+
+    r1 = l1[0]
+    r2 = l2[0]
+    r1 = r1*(255-a2) # sorta fixed point
+    r2 = r2*a2
+
+    g1 = l1[1]
+    g2 = l2[1]
+    g1 = g1*(255-a2) # sorta fixed point
+    g2 = g2*a2
+
+    b1 = l1[2]
+    b2 = l2[2]
+    b1 = b1*(255-a2) # sorta fixed point
+    b2 = b2*a2
+
+    ac = a1+(a2*(255-a1)//255)
+    rc = (r1+r2) // 255
+    gc = (g1+g2) // 255
+    bc = (b1+b2) // 255
+
+    return rc, gc, bc, ac
+
+def blend_images(base, overlay):
+    w, h = base.size
+    b = base.load()
+    o = overlay.load()
+    for x in range(w):
+        for y in range(h):
+            b[x,y] = int_alpha_composit(b[x,y], o[x,y])
+    return base
+
+def diff_images(base, overlay, magenter = False):
+    w, h = base.size
+    b = base.load()
+    o = overlay.load()
+    blanks = {(0,0,0,0)}
+    if magenter:
+        blanks.add((254,0,254,255))
+        blanks.add((254,0,254))
+
+    for x in range(w):
+        for y in range(h):
+            if o[x,y] in blanks:
+                o[x,y] = b[x,y]
+    return overlay
+
+def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = False, provide_extra_data: bool = False, composite_layers: bool = True):
     if type(apf2) == bytes:
         apf2 = apf2.decode("ascii")
 
@@ -264,12 +442,14 @@ def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = Fal
     for line in apf_list:
         if line:
             apf_lines.append(line)
+
     if apf_lines[0].strip() == "APERTURE IMAGE FORMAT (c) 1985": # on the fly apf2 upgrade
         apf2 = f"APERTURE IMAGE FORMAT (c) 1993\n320x200,l,{apf_list[1]}\n.\n{apf_list[2]}"
         apf_lines = apf2.splitlines()
 
-    if not apf_lines[0].strip() == apf2headertext and not apf_lines[0].strip() == apf2headertext1994:
-        raise Exception("Invalid Aperture Image Format File")
+    if not apf_lines[0].strip() == apf2headertext and not apf_lines[0].strip() == apf2headertext1994 and not apf_lines[0].strip() == apf2headertext2000:
+        raise Exception("Invalid/Unsupported Aperture Image Format File")
+
     metadata = apf_lines[1].strip().split(",")
     if len(metadata) > 4:
         delay = int(metadata[4])
@@ -282,22 +462,86 @@ def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = Fal
     arguments = metadata[1]
     lineskip = int(metadata[2])
 
-    if "l" in arguments:
-        mode = "legacy"
-    elif "d" in arguments:
-        mode = "apf2-1994"
-    else:
-        mode = "apf2"
+    data = apf_lines[3:]
 
-    if "m" in arguments:
-        datatype = "multistream"
-        data = apf_lines[3:]
-    else:
-        datatype = "singlestream"
-        data = apf_lines[3]
-    istrans = int(("t" in arguments))
-    if not istrans:
-        istrans = int(("a" in arguments))*2
+    # modes:
+    # 0 - 2 colors
+    # 1 - 95 colors
+    # 2 - 9025 colors
+    # 3 - near-truecolor
+    # 4 - near-truecolor with alpha
+    # 5 - truecolor
+    # 6 - truecolor with alpha
+    # 7 - Mode 1-based Grayscale
+    # 8 - Mode 2-based Grayscale
+
+    mode = 1 # standard mode
+    tulplen = 2 # standard tuple length, IR
+    animated = False # don't return an animation
+    transparency_mode = 0 # no transparency
+
+    composted = False # for apf2 animation, which does not use cross-frame compression unless the 2000 version's c flag is present
+    uncompressed = False # RLE is on
+    topdownscan = False # Bottom-top Scanning is default
+
+    magenter = False # Edge Case for q images, treat FE00FE/~ ~ as 00000000 (pure black alpha)
+
+    for arg in arguments:
+        # color modes
+        if arg == "l": # Legacy
+            mode = 0
+            tulplen = 1 # R
+        elif arg == "i": # Index
+            mode = 1
+            tulplen = 2 # IR
+        elif arg == "d": # Dual-index
+            mode = 2
+            tulplen = 3 # IIR
+        elif arg == "q": # Quality mode
+            mode = 3
+            tulplen = 4 # RGBR
+        elif arg == "n": # Near-truecolor + alpha
+            mode = 4
+            tulplen = 5 # RGBAR
+            transparency_mode = 2 # implicit to the mode
+        elif arg == "T": # Truecolor
+            mode = 5
+            tulplen = 5 # RGBCR
+        elif arg == "A": # truecolor + Alpha
+            mode = 6
+            tulplen = 6 # RGBACR
+            transparency_mode = 2 # implicit to the mode
+        # Index-based Grayscale modes
+        elif arg == "g": # 95-color Grayscale
+            mode = 7
+            tulplen = 2 # IR
+        elif arg == "G": # 8-bit Grayscale
+            mode = 8
+            tulplen = 3 # IIR
+
+        # data modes
+        elif arg == "m": # Multistream
+            animated = True
+        elif arg == "c": # Combine
+            composted = True
+        elif arg == "u": # Upside down
+            topdownscan = True
+        elif arg == "U": # Uncompressed
+            uncompressed = True
+
+        # Transparency modes
+        elif arg == "t": # Transparency
+            transparency_mode = 1
+        elif arg == "a": # Alpha transparency
+            transparency_mode = 2
+        elif arg == "M": # Magenta transparency
+            magenter = True
+
+
+    if uncompressed:
+        tulplen -= 1 # removing R reduces RLE size
+    if tulplen == 0:
+        raise ValueError("Invalid Image! Legacy images cannot be uncompressed!")
 
     apfbuffer = []
     for i in range((h)):
@@ -307,80 +551,107 @@ def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = Fal
         apfbuffer.append(row)
 
     imgs = []
-    if datatype == "multistream":
-        if mode == "legacy":
-            pals = apf_lines[2].split(".")
-            if pals[0] == "":
-                if istrans == 1:
-                    pals[0] = (0,0,0,0)
-                else:
-                    pals[0] = (0,0,0)
+
+    uncompressed
+
+    if mode == 0:
+        pals = apf_lines[2].split(".")
+        if pals[0] == "":
+            if transparency_mode:
+                pals[0] = (0,0,0,0)
             else:
-                hexcsegment = textwrap.wrap(pals[0], 2)
+                pals[0] = (0,0,0)
+        else:
+            hexcsegment = textwrap.wrap(pals[0], 2)
+            if transparency_mode == 2:
+                pals[0] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
+            else:
                 pals[0] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
-            if pals[1] == "":
-                pals[1] = (255,255,255)
+
+        if pals[1] == "":
+            pals[1] = (255,255,255)
+        else:
+            hexcsegment = textwrap.wrap(pals[1], 2)
+            if transparency_mode == 2:
+                pals[1] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
             else:
-                hexcsegment = textwrap.wrap(pals[1], 2)
                 pals[1] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
-            for ds in data:
-                imgs.append(apf2_apfdecodedata(ds, h, w, apfbuffer, lineskip, pals, istrans))
-        elif mode == "apf2-1994":
-            pals = apf_lines[2]
-            for ds in data:
-                imgs.append(apf2_1994_decodedata(ds, h, w, apfbuffer, lineskip, pals, istrans))
-        else:
-            pals = apf_lines[2]
-            for ds in data:
-                imgs.append(apf2decodedata(ds, h, w, apfbuffer, lineskip, pals, istrans))
+        for ds in data:
+            imgs.append(apf2_apfdecodedata(ds, h, w, apfbuffer, lineskip, pals, transparency_mode, topdownscan))
+
+    elif mode in (1, 2, 3, 4, 5, 6, 7, 8):
+        pals = apf_lines[2]
+        for ds in data:
+            imgs.append(apf2decodedata(ds, h, w, apfbuffer, lineskip, pals, transparency_mode, tulplen, uncompressed, mode, topdownscan))
+    else:
+        raise NotImplementedError("Full A2K Decoding is not supported")
+
+    multiple_streams = (len(imgs) > 1)
+
+    if animated and composted:
+        baseimg = imgs[0]
+        imgs_new = [baseimg.copy()]
+        for img in imgs[1:]:
+            baseimg = diff_images(baseimg, img, magenter)
+            imgs_new.append(baseimg.copy())
+        imgs = imgs_new
+
+    if multiple_streams and animated and not returnImageObject:
+        multiple_streams = True
         imageData = io.BytesIO()
-        if mode == "apf2-1994":
+
+        if mode > -1: # covers mode 2+ which use more colors than GIF's 256 max colors
             imgs[0].save(imageData, format="WebP", save_all=True, append_images=imgs[1:], loop=0, duration=delay, disposal=2, lossless=True)
         else:
             imgs[0].save(imageData, format="GIF", save_all=True, append_images=imgs[1:], loop=0, duration=delay, disposal=2)
-        imageData = imageData.getvalue()
-    else:
-        if mode == "legacy":
-            pals = apf_lines[2].split(".")
-            if pals[0] == "":
-                if istrans == 1:
-                    pals[0] = (0,0,0,0)
-                else:
-                    pals[0] = (0,0,0)
-            else:
-                hexcsegment = textwrap.wrap(pals[0], 2)
-                pals[0] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
-            if pals[1] == "":
-                pals[1] = (255,255,255)
-            else:
-                hexcsegment = textwrap.wrap(pals[1], 2)
-                pals[1] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
 
-            img = apf2_apfdecodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
-        elif mode == "apf2-1994":
-            pals = apf_lines[2]
-            img = apf2_1994_decodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
-        else:
-            pals = apf_lines[2]
-            img = apf2decodedata(data, h, w, apfbuffer, lineskip, pals, istrans)
+        imageData = imageData.getvalue()
+
+    elif (not multiple_streams) and animated:
+        animated = False # don't return an animation
+
+    if multiple_streams and not animated and composite_layers:
+        baseimg = imgs[0]
+        for img in imgs[1:]:
+            baseimg = blend_images(baseimg, img)
+        imgs = [baseimg]
 
     if returnImageObject:
-        if datatype == "multistream":
+        if animated:
             if provide_extra_data:
                 return imgs, delay # list object, be careful
             else:
                 return imgs
         else:
-            return img
+            return imgs[0]
+
     else:
-        if datatype == "multistream":
+        if animated:
             return imageData
         else:
             imageData = io.BytesIO()
-            img.save(imageData, format=format)
+            imgs[0].save(imageData, format=format)
             imageData = imageData.getvalue()
             return imageData
+
+def slice_frames(img: Image, animated, trans):
+    frametiming = None
+
+    colmod = "RGB"
+    if trans:
+        colmod+="A"
+    frames = []
+
+    if animated:
+        for frame in ImageSequence.Iterator(img):
+            if not frametiming:
+                frametiming = frame.info.get("duration", img.info.get("duration", 0))
+            frame = frame.convert(colmod)
+            frames.append(frame)
+        return frames, frametiming
+    else:
+        return img, None
 
 def reduce_to_apf2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None, dodithering: bool = False):
     trans = int(trans)
@@ -516,23 +787,23 @@ def reduce_to_apf_in_apf2_quality(img: Image, animated: bool = False):
         return img, None
 
 
-def generate_runs_apf2_l(bitmap: list, lineskip: int, w: int, h: int):
+def generate_runs_apf2_l(bitmap: list, lineskip: int, w: int, h: int, topside_first: bool = False, bg = False, trans: int = 0):
     runcounter = 0
-    currentrun = False  # swapping this will invert the image as well
+    if trans == 2:
+        currentrun = bg
+    elif bg and type(bg) == tuple:
+        currentrun = bg[0:3]
+    else:
+        currentrun = False
     runlens = []
-    curline = h-1
-    revmap = []
-    passoffset = 0
-    for i in range(h):
-        revmap.append(bitmap[curline])
-        curline -= lineskip
-        if curline < 0:
-            curline = h-1
-            passoffset +=1
-            curline -= passoffset
+    n = 0
+
+    revmap = order_pixels(bitmap, h, lineskip, topside_first)
 
     for vline in revmap:
         for pixel in vline:
+            if trans != 2 and type(pixel) == tuple:
+                pixel = pixel[0:3]
             if currentrun == pixel:
                 if runcounter+1 > 94:
                     runlens.append(runcounter)
@@ -547,7 +818,165 @@ def generate_runs_apf2_l(bitmap: list, lineskip: int, w: int, h: int):
         runlens.append(runcounter)
     return runlens
 
-def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False, prepalette: str = None):
+def uint8_to_base95_with_corrector(val):
+    d = mapping[val]
+    c = mapping.index(d)
+    e = val - c
+    return d, e
+
+# this orders the pixels to be in scan order
+def order_pixels(bitmap, h, lineskip, topside_first):
+    revmap = []
+    passoffset = 0
+    if topside_first:
+        curline = 0
+    else:
+        curline = h-1
+
+    for i in range(h):
+        revmap.append(bitmap[curline])
+        if topside_first:
+            curline += lineskip
+            if curline > h-1:
+                passoffset +=1
+                curline = passoffset
+        else:
+            curline -= lineskip
+            if curline < 0:
+                passoffset +=1
+                curline = h-1-passoffset
+
+    return revmap
+
+def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, compress: bool, topside_first: bool, mode: int, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False, transmag: bool = False):
+    if mode <3: # heart
+        raise ValueError("Modes 0, 1, and 2 should not be flex encoded!")
+
+    # defaults to off
+    gray = False
+    perfect = False
+    alpha = False
+    fakealpha = False
+
+    if mode in (7, 8):
+        gray = True
+        if mode == 8:
+            perfect = True
+
+    if mode in (5, 6):
+        perfect = True
+
+    if mode in (4, 6):
+        alpha = True
+
+    if mode == 5 and trans:
+        fakealpha = True
+
+    runcounter = 0
+    currentrun = None
+    runlens = []
+
+    revmap = order_pixels(bitmap, h, lineskip, topside_first)
+    prevrev = None
+    if prevframe:
+        prevrev = order_pixels(prevframe, h, lineskip, topside_first)
+
+    # modes:
+    # 0 - 2 colors
+    # 1 - 95 colors
+    # 2 - 9025 colors
+    # 3 - near-truecolor
+    # 4 - near-truecolor with alpha
+    # 5 - truecolor
+    # 6 - truecolor with alpha
+    # 7 - Mode 1-based Grayscale
+    # 8 - Mode 2-based Grayscale
+
+    transtuples = ("    ", "     ") # 4 spaces is for m4 and m5+t, 5 spaces is for m6
+    if transmag:
+        transtuples = ("    ", "     ", "~ ~")
+
+    for y in range(h):
+        for x in range(w):
+            isTransPix = False
+            pixel = revmap[y][x]
+            if prevrev:
+                if not avoid_run_breaks or (not (runcounter>1 and not currentrun in transtuples)):
+                    if pixel == prevrev[y][x]:
+                        pixel = (254, 0, 254) if transmag else (0,0,0,0)
+                        isTransPix = True
+
+            if gray:
+                pixtup = (pixel[0]+pixel[0]+pixel[1]+pixel[1]+pixel[1]+pixel[2])//6 # 2xR, 3xG, 1xB
+                if perfect:
+                    i0, i1 = pixtup%95, pixtup//95
+                    ind = chr(i1+32)+chr(i0+32)
+                    curpixval = ind
+                else:
+                    v, _ = uint8_to_base95_with_corrector(pixtup)
+                    curpixval = v
+
+            else:
+                if combine and pixel == (0,0,0,0) and not isTransPix:
+                    pixel = (255,0,255,0) # alpha is zero but the RGB is non-zero
+
+                r, rc = uint8_to_base95_with_corrector(pixel[0])
+                g, gc = uint8_to_base95_with_corrector(pixel[1])
+                b, bc = uint8_to_base95_with_corrector(pixel[2])
+                a, ac = "~", 0
+
+                if alpha:
+                    a, ac = uint8_to_base95_with_corrector(pixel[3])
+
+                # tri-level alpha for free
+                elif fakealpha and perfect:
+                    if pixel[3] >= 176:
+                        ac = 2
+                    elif pixel[3] <= 80:
+                        ac = 0
+                    else:
+                        ac = 1
+
+                cval = ((rc)+(gc*3)+(bc*9)+(ac*27))
+                c = chr(cval+32)
+
+                ccol = [r, g, b]
+                if alpha:
+                    ccol.append(a)
+                if perfect:
+                    ccol.append(c)
+
+                curpixval = "".join(ccol)
+                if not isTransPix and (transmag and curpixval == "~ ~"):
+                    curpixval = "~!~"
+
+            if currentrun == curpixval:
+                if (runcounter+1 > 94) or (not compress): # dont compress
+                    if currentrun is not None:
+                        runlens.append([curpixval, runcounter])
+                    currentrun = curpixval
+                    runcounter = 0
+
+                runcounter += 1
+
+            else:
+                if currentrun is not None:
+                    runlens.append([currentrun, runcounter])
+                runcounter = 1
+                currentrun = curpixval
+
+    if runcounter > 0:
+        if trans and currentrun[3] == 0:
+            currentrun = (0,0,0,0)
+        runlens.append([curpixval, runcounter])
+
+    rldb = []
+    for rl in runlens:
+        rldb.append(rl[1])
+    total = sum(rldb)
+    return runlens
+
+def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False, prepalette: str = None, compress: bool = True, topside_first: bool = False, palette_only: bool = False, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False):
     trans = int(trans)
     colpal = {}
     colpalbnr = {}
@@ -613,24 +1042,28 @@ def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: in
 
         apf2pal = ''.join(apf2pal_array)
 
+        if palette_only: # Moderate optimization
+            return None, apf2pal
+
     runcounter = 0
     currentrun = None
     runlens = []
-    curline = h-1
-    revmap = []
-    passoffset = 0
-    for i in range(h):
-        revmap.append(bitmap[curline])
-        curline -= lineskip
-        if curline < 0:
-            curline = h-1
-            passoffset +=1
-            curline -= passoffset
 
-    for vline in revmap:
-        for pixel in vline:
+    revmap = order_pixels(bitmap, h, lineskip, topside_first)
+    prevrev = None
+    if prevframe:
+        prevrev = order_pixels(prevframe, h, lineskip, topside_first)
+
+    for y in range(h):
+        for x in range(w):
+            pixel = revmap[y][x]
+            if prevrev:
+                if not avoid_run_breaks or (not (runcounter>1 and not currentrun == (0,0,0,0))):
+                    if pixel == prevrev[y][x]:
+                        pixel = (0,0,0,0)
+
             if currentrun == pixel:
-                if runcounter+1 > 94:
+                if (runcounter+1 > 94) or (not compress): # dont compress
                     if currentrun is not None:
                         if not currentrun in colpalbnr:
                             if not currentrun[3] == 255:
@@ -660,58 +1093,143 @@ def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: in
     total = sum(rldb)
     return runlens, apf2pal
 
-def apf2palettedecode(pal: str, dim: bool = False, alpha: bool = False, dump: bool = True):
-    tupledump = []
-    statepal = {}
-    tullength = 7
-    il = 1
-    if alpha:
-        tullength += 2
-    if dim:
-        il = 2
-        tullength += 1
+# wrapper function to encode the data
+def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress):
+    apf2pal = None
 
-    palsegments = [pal[i:i+tullength] for i in range(0, len(pal), tullength)]
+    if legacy:
+        outputs = []
+        for bitmap in bitmaps:
+            temp = []
+            runlens = generate_runs_apf2_l(bitmap, lineskip, w, h, topside_first, bg, trans)
+            for num in runlens:
+                temp.append(chr(num+32))
+            tempstr = "".join(temp)
+            temp = None
+            outputs.append(tempstr)
+        output = "\n".join(outputs)
 
-    if alpha:
-        for col in palsegments:
-            ind = col[:il]
-            hexcs = col[il:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            if dump:
-                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16)))
-            else:
-                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16),int(hexcsegment[3], 16))
+    elif gray or truecolor:
+        outputs = []
+        for bm in range(len(bitmaps)):
+            temp = []
+            prevframe = None
+            if bm != 0 and combine:
+                prevframe = bitmaps[bm-1]
+
+            runlens = generate_runs_apf2_f(bitmaps[bm], lineskip, w, h, trans, compress, topside_first, mode, combine, prevframe, avoid_run_breaks, transmag)
+            for num in runlens:
+                temp.append(num[0])
+                if compress:
+                    temp.append(chr(num[1]+32))
+
+            tempstr = "".join(temp)
+            temp = None
+            outputs.append(tempstr)
+
+        output = "\n".join(outputs)
+
     else:
-        for col in palsegments:
-            ind = col[:il]
-            hexcs = col[il:]
-            hexcsegment = textwrap.wrap(hexcs, 2)
-            if dump:
-                tupledump.append((int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16), 255))
+        outputs = []
+        _, apf2pal = generate_runs_apf2(bitmaps[0], palette, lineskip, w, h, trans, dim, prepalette, compress, topside_first, True)
+
+        for bm in range(len(bitmaps)):
+            temp = []
+            prevframe = None
+            if bm != 0 and combine:
+                prevframe = bitmaps[bm-1]
+
+            runlens, _ = generate_runs_apf2(bitmaps[bm], palette, lineskip, w, h, trans, dim, prepalette, compress, topside_first, False, combine, prevframe, avoid_run_breaks)
+            for num in runlens:
+                temp.append(num[0])
+                if compress:
+                    temp.append(chr(num[1]+32))
+
+            tempstr = "".join(temp)
+            temp = None
+            outputs.append(tempstr)
+
+        output = "\n".join(outputs)
+
+        if trans == 1:
+            if dim:
+                apf2pal = "  FF00FF"+apf2pal
             else:
-                statepal[ind] = (int(hexcsegment[0], 16),int(hexcsegment[1], 16),int(hexcsegment[2], 16))
+                apf2pal = " FF00FF"+apf2pal # this is for decoders without transparency support
 
-    if dump:
-        return tupledump
-    else:
-        return statepal
+    return output, apf2pal
 
-def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False):
+def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False):
     frametiming = None
     bakedpal = None
     dim = False
+    transmag = False
+
     trans = int(trans) # compatability filter
     if trans > 2:
-        raise Exception("Invalid Transparency Mode!")
+        raise Exception("Error: Invalid Transparency Mode!")
+
+    if mode and mode > 8:
+        raise Exception("Error: Invalid Mode!")
+
+    if combine and mode == 3:
+        transmag = True
+    elif combine and trans == 0:
+        trans = 1
+
+    find_bgfg = False
+    bgfg = None
+    bg = False # needed
+    palette = None
+
+    if pal == 2 and mode in (None, 0):
+        legacy = True
+        find_bgfg = True
+
+    gray = False
+    truecolor = False
+
+    if findbestlineskip and lineskip == None:
+        print("Warning: findbestlineskip enabled and no lineskip provided, setting max pass check to 10")
+        lineskip = 10
+
+    if lineskip is None:
+        lineskip = 1
 
     if pal > 95:
         dim = True
         if pal > 9025:
-            raise Exception("Palette cannot be larger than 9025 colors!")
+            raise Exception("Error: Palette cannot be larger than 9025 colors!")
+
+    if not legacy and mode == 0:
+        legacy = True
+    if mode == 2:
+        dim = True
+
+    if mode == 7:
+        gray = 1
+    if mode == 8:
+        gray = 2
+
+    if combine and gray:
+        print("Warning: You cannot use combine with grayscale images")
+        combine = False
+        trans = 0
+
+    if legacy:
+        combine = False
+
+    if mode in (3, 4, 5, 6):
+        truecolor = True
+
+    if mode in (4, 6):
+        trans = 2
 
     if legacy and prepalette:
-        raise Exception("Legacy mode cannot be used in conjunction with a pre-baked palette!")
+        raise Exception("Error: Legacy mode cannot be used in conjunction with a pre-baked palette!")
+
+    if legacy and not compress:
+        raise Exception("Error: Legacy mode cannot be uncompressed!")
 
     if prepalette:
         if dim:
@@ -725,7 +1243,7 @@ def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool =
             else:
                 bakedpal = apf2palettedecode(prepalette, False, False, True)
 
-    if trans == 1 and (pal == 95):
+    if trans == 1 and (pal == 95) and (not mode == 2):
         pal = 94
     if trans == 1 and (pal == 9025):
         pal = 9024
@@ -733,15 +1251,52 @@ def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool =
     if type(img) == bytes:
         img = Image.open(io.BytesIO(img))
 
+    w, h = img.size
+
     animated = getattr(img, "is_animated", False)
-    if legacy:
+    if legacy and not find_bgfg:
         img, frametiming = reduce_to_apf_in_apf2_quality(img, animated)
-    else:
+    elif not truecolor and not gray:
         img, palette, frametiming, trans = reduce_to_apf2_quality(img, pal, animated, trans, bakedpal, dodithering)
+    else:
+        img, frametiming = slice_frames(img, animated, trans)
+
+    if find_bgfg:
+        mod = "RGB"
+        if trans:
+            mod += "A"
+        if type(img) is list:
+            img_rgb = img[0].convert(mod)
+        else:
+            img_rgb = img.convert(mod)
+        pixacc = img_rgb.load()
+
+        bg = pixacc[0, 0]
+        fg = None
+        stop = False
+
+        for y in range(h):
+            for x in range(w):
+                if pixacc[x, y] != bg:
+                    fg = pixacc[x, y]
+                    break
+
+            if fg is not None:
+                break
+
+        if fg is None:
+            fg = (255, 255, 255)
+        bgfg = (bg, fg)
 
     imageData = io.StringIO()
+
+    uses2000extensions = (not compress or topside_first or emit_redundant_flag or gray or combine or truecolor)
+
     uses1994extensions = (trans == 2 or dim)
-    if uses1994extensions:
+
+    if uses2000extensions:
+        apflist = [apf2headertext2000]
+    elif uses1994extensions:
         apflist = [apf2headertext1994]
     else:
         apflist = [apf2headertext]
@@ -760,26 +1315,50 @@ def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool =
         pixels = img.load()
         res = img.size
     metadata.append(f"{res[0]}x{res[1]}")
-    w = res[0]
-    h = res[1]
 
     args = ""
     if legacy:
         args+="l"
     if trans == 1:
         args+="t"
-    if trans == 2:
-        args+="a"
     if animated:
         args+="m"
+
+    if trans == 2:
+        args+="a"
     if dim:
         args+="d"
+
+    if not compress:
+        args+="U"
+    if topside_first:
+        args+="u"
+    if emit_redundant_flag and (not (legacy or dim)):
+        args+="i"
+    if combine:
+        args+="c"
+    if transmag:
+        args+="M"
+
+    if gray == 1:
+        args+="g"
+    if gray == 2:
+        args+="G"
+
+    if mode == 3:
+        args+="q"
+    if mode == 4:
+        args+="n"
+    if mode == 5:
+        args+="T"
+    if mode == 6:
+        args+="A"
 
     metadata.append(args)
     if not findbestlineskip:
         metadata.append(str(lineskip))
 
-    if legacy:
+    if legacy and not bgfg:
         if animated:
             bitmaps = []
             for pixels in frames:
@@ -794,121 +1373,53 @@ def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool =
         if animated:
             bitmaps = []
             for img in frames:
-                img_rgb = img.convert(colmode)
-                pixels = img_rgb.load()
-                if trans == 1:
-                    bitmaps.append([[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(img.width)] for y in range(img.height)])
+                if type(img) == Image.Image:
+                    img_rgb = img.convert(colmode)
+                    pixels = img_rgb.load()
                 else:
-                    bitmaps.append([[pixels[x, y] for x in range(img.width)] for y in range(img.height)])
+                    pixels = img
+                if trans == 1:
+                    bitmaps.append([[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(w)] for y in range(h)])
+                else:
+                    bitmaps.append([[pixels[x, y] for x in range(w)] for y in range(h)])
         else:
             img_rgb = img.convert(colmode)
             pixels = img_rgb.load()
             if trans == 1:
-                bitmap = [[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(img.width)] for y in range(img.height)]
+                bitmap = [[(*pixels[x, y][:3], 255 if pixels[x, y][3] > 0 else 0) for x in range(w)] for y in range(h)]
             else:
-                bitmap = [[pixels[x, y] for x in range(img.width)] for y in range(img.height)]
+                bitmap = [[pixels[x, y] for x in range(w)] for y in range(h)]
 
         img_rgb = None # take out the trash
         pixels = None
         frames = None
 
     output = ""
-    if findbestlineskip and not animated: # animated images may be wildly inconsistant, and computing them all would take a really long time for what is a small efficiency gain in file size.
-        lens = {}
-        shortestId = None
-        shortestlen = float('inf')
-        maxrange = lineskip
-        if h-1 < lineskip:
-            maxrange = h-1
-        for i in range(1, maxrange):
-            lens[str(i)] = None
-        for ls in lens:
-            if legacy:
-                lens[ls] = generate_runs_apf2_l(bitmap, int(ls), w, h)
-            else:
-                lens[ls], apf2pal = generate_runs_apf2(bitmap, palette, int(ls), w, h, trans, dim, prepalette)
-        for ls in lens:
-            totallen = len(lens[ls])+len(str(ls))
-            if totallen < shortestlen:
-                shortestlen = totallen
-                shortestId = ls
-        runlens = lens[shortestId]
-        metadata.append(str(shortestId))
 
-        if legacy:
-            temp = []
-            apf2pal = "."
-            for num in runlens:
-                temp.append(chr(num+32))
-            output = "".join(temp)
-            temp = None
-        else:
-            temp = []
-            for num in runlens:
-                temp.append(num[0])
-                temp.append(chr(num[1]+32))
-            output = "".join(temp)
-            temp = None
+    if not animated:
+        bitmaps = [bitmap]
 
-        if trans == 1 and not legacy:
-            if dim:
-                apf2pal = "  FF00FF"+apf2pal
-            else:
-                apf2pal = " FF00FF"+apf2pal # this is for decoders without transparency support
+    if findbestlineskip:
+        all_outputs = {}
+        apf2pal = None
+        outsize = float('inf')
+        if lineskip >= h:
+            lineskip = h-1
+
+        for lsk in range(lineskip):
+            lsk+=1
+            output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lsk, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress)
+            all_outputs[str(lsk)] = output
+        for lsk in all_outputs:
+            if outsize > len(all_outputs[lsk])+len(lsk):
+                output = all_outputs[lsk]
+                outsize = len(all_outputs[lsk])+len(lsk)
+                lineskip = int(lsk)
+        metadata.append(str(lineskip))
     else:
-        if animated:
-            if legacy:
-                outputs = []
-                for bitmap in bitmaps:
-                    temp = []
-                    runlens = generate_runs_apf2_l(bitmap, lineskip, w, h)
-                    for num in runlens:
-                        temp.append(chr(num+32))
-                    tempstr = "".join(temp)
-                    temp = None
-                    outputs.append(tempstr)
-                output = "\n".join(outputs)
-            else:
-                outputs = []
-                _, apf2pal = generate_runs_apf2(bitmaps[0], palette, lineskip, w, h, trans, dim, prepalette)
-                for bitmap in bitmaps:
-                    temp = []
-                    runlens, _ = generate_runs_apf2(bitmap, palette, lineskip, w, h, trans, dim, prepalette)
-                    for num in runlens:
-                        temp.append(num[0])
-                        temp.append(chr(num[1]+32))
-                    tempstr = "".join(temp)
-                    temp = None
-                    outputs.append(tempstr)
+        output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress)
 
-                output = "\n".join(outputs)
 
-                if trans == 1 and not legacy:
-                    if dim:
-                        apf2pal = "  FF00FF"+apf2pal
-                    else:
-                        apf2pal = " FF00FF"+apf2pal # this is for decoders without transparency support
-        else:
-            if legacy:
-                runlens = generate_runs_apf2_l(bitmap, lineskip, w, h)
-                temp = []
-                for num in runlens:
-                    temp.append(chr(num+32))
-                output = "".join(temp)
-                temp = None
-            else:
-                runlens, apf2pal = generate_runs_apf2(bitmap, palette, lineskip, w, h, trans, dim, prepalette)
-                if trans == 1 and not legacy:
-                    if dim:
-                        apf2pal = "  FF00FF"+apf2pal
-                    else:
-                        apf2pal = " FF00FF"+apf2pal # this is for decoders without transparency support
-                temp = []
-                for num in runlens:
-                    temp.append(num[0])
-                    temp.append(chr(num[1]+32))
-                output = "".join(temp)
-                temp = None
     if desc or frametiming:
         metadata.append(desc)
     if frametiming:
@@ -917,8 +1428,22 @@ def encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool =
     metadata = ",".join(metadata)
     apflist.append(metadata)
 
-    if legacy:
+    if gray or truecolor:
         apflist.append(".")
+    elif legacy:
+        if bgfg:
+            if trans == 2:
+                bg = f"{bgfg[0][0]:02X}{bgfg[0][1]:02X}{bgfg[0][2]:02X}{bgfg[0][3]:02X}"
+                fg = f"{bgfg[1][0]:02X}{bgfg[1][1]:02X}{bgfg[1][2]:02X}{bgfg[1][3]:02X}"
+            else:
+                if trans == 1:
+                    bg = ""
+                else:
+                    bg = f"{bgfg[0][0]:02X}{bgfg[0][1]:02X}{bgfg[0][2]:02X}"
+                fg = f"{bgfg[1][0]:02X}{bgfg[1][1]:02X}{bgfg[1][2]:02X}"
+            apflist.append(f"{bg}.{fg}")
+        else:
+            apflist.append(".")
     else:
         apflist.append(apf2pal)
 

@@ -3,9 +3,9 @@
 from . import bruh, otb, wbmp, apf, apf2, mqif, scqoi, bittools
 from .apfcli import main as cli
 
-extensions = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2")
+extensions = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".a2k", ".ap2k")
 extensions_apf = (".apf", ".aif")
-extensions_apf2 = (".apf2", ".af2", ".ap2", ".aif2")
+extensions_apf2 = (".apf2", ".af2", ".ap2", ".aif2", ".a2k", ".ap2k")
 extensions_wbmp = (".wbmp", ".wbitmap", ".wbm")
 extensions_otb = (".otb", ".ota", ".otab")
 extensions_bruh = (".bruh", ".brh")

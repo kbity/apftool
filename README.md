@@ -85,6 +85,8 @@ apftool provides many extensions tuples:
 
 ## changelog:
 
+1.1.0 - add APF2-2000 support, and add bg.fg support. Also you can now run findbestlineskip on animations. APF2-2000 is a major upgrade over APF2-1994 that adds Truecolor modes, internal alpha composting for layered images, cross-frame compression, and a lot more.
+
 1.0.0 - restructure ABI, add MQIF support. Legacy ABI will be emulated. Also improve bruh and apf encoding speed. Also make apf2 decoder force webp for animated images in dual-indexed mode.
 
 0.5.16 - add apfcli to the main project, fix dithering, fix palette edge cases, and rename encodeaf2 and decodeaf2 to encodeapf2 and decodeapf2
