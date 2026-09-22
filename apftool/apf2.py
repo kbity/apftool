@@ -211,6 +211,9 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
         r = mapping.index(inpt[0])
         g = mapping.index(inpt[1])
         b = mapping.index(inpt[2])
+        r = r+int(r == 254)
+        g = g+int(g == 254)
+        b = b+int(b == 254)
         return r, g, b
 
     elif mode == 4:
@@ -218,6 +221,10 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
         g = mapping.index(inpt[1])
         b = mapping.index(inpt[2])
         a = mapping.index(inpt[3])
+        r = r+int(r == 254)
+        g = g+int(g == 254)
+        b = b+int(b == 254)
+        a = a+int(a == 254)
         return r, g, b, a
 
     elif mode == 5:
@@ -424,8 +431,8 @@ def diff_images(base, overlay, magenter = False):
     o = overlay.load()
     blanks = {(0,0,0,0)}
     if magenter:
-        blanks.add((254,0,254,255))
-        blanks.add((254,0,254))
+        blanks.add((255,0,255,255))
+        blanks.add((255,0,255))
 
     for x in range(w):
         for y in range(h):
@@ -903,7 +910,7 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
             if prevrev:
                 if not avoid_run_breaks or (not (runcounter>1 and not currentrun in transtuples)):
                     if pixel == prevrev[y][x]:
-                        pixel = (254, 0, 254) if transmag else (0,0,0,0)
+                        pixel = (255, 0, 255) if transmag else (0,0,0,0)
                         isTransPix = True
 
             if gray:
@@ -1159,7 +1166,7 @@ def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_fir
 
     return output, apf2pal
 
-def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False):
+def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None):
     frametiming = None
     bakedpal = None
     dim = False
@@ -1252,6 +1259,18 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
         img = Image.open(io.BytesIO(img))
 
     w, h = img.size
+
+    # preserve aspect ratio modes
+    if width is not None and height is None:
+        aspct = h/w
+        height = round(width*aspct)
+    if width is None and height is not None:
+        aspct = w/h
+        width = round(height*aspct)
+
+    if width is not None and height is not None:
+        img = img.resize((width, height))
+        w, h = img.size
 
     animated = getattr(img, "is_animated", False)
     if legacy and not find_bgfg:

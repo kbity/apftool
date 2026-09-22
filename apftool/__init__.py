@@ -13,6 +13,8 @@ extensions_mqif = (".mqif", ".mqi")
 
 extensions_txt = (".txt", ".text") # txt is seen as a generic container for apf/apf2 because they're just txt files
 
+version = "1.1.3"
+
 extensions_all = []
 extensions_all.extend(extensions_apf+extensions_apf2+extensions_wbmp+extensions_otb+extensions_bruh+extensions_mqif)
 

@@ -8,6 +8,8 @@ exts = Image.registered_extensions()
 supported_extensions = {ex for ex, f in exts.items() if f in Image.OPEN}
 
 def main():
+    print(f"apftool cli [v{apftool.version}] (c) 2026 Maristocratic Communications")
+
     if len(sys.argv) < 3:
         print("""Usage: apfcli <input_file> <output file>
 arguents:
@@ -40,8 +42,8 @@ encoding:
     7 - Mode 1-based Grayscale
     8 - Mode 2-based Grayscale
 
---width - (OTB) sets width (default is 255)
---height - (OTB) sets height (default is 255)
+--width - (OTB/APF2) sets width (default is 255)
+--height - (OTB/APF2) sets height (default is 255)
 
 --transcolor - (MQIF) sets color to be made transparent (default is None)
 
@@ -68,8 +70,12 @@ TODO: MQIF encoding
     lineskip = None
     dither = False
     description = ""
-    wid = 255
-    hei = 255
+    if opext in apftool.extensions_apf2:
+        wid = None
+        hei = None
+    else:
+        wid = 255
+        hei = 255
     transcolor = None
     flip = False
     compress = True
@@ -147,7 +153,7 @@ TODO: MQIF encoding
             encoded = apftool.mqif.encode(img_bytes, transcolor)
 
         elif opext in apftool.extensions_apf2:
-            encoded = apftool.apf2.encode(img_bytes, lineskip=lineskip, findbestlineskip=fbls, legacy=legacy, trans=trans, pal=maxpalette, desc=description, prepalette= None, dodithering=dither, returnbytes=True, compress=compress, topside_first=flip, mode=mode, combine=combine, avoid_run_breaks=avoid_run_breaks)
+            encoded = apftool.apf2.encode(img_bytes, lineskip=lineskip, findbestlineskip=fbls, legacy=legacy, trans=trans, pal=maxpalette, desc=description, prepalette= None, dodithering=dither, returnbytes=True, compress=compress, topside_first=flip, mode=mode, combine=combine, avoid_run_breaks=avoid_run_breaks, width=wid, height=hei)
 
         else:
             raise ValueError("Unsupported Image Format!")

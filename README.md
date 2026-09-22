@@ -29,7 +29,9 @@ bruh is an intentionally terrible format made by facedev. info can be found [her
 
 `apf.encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, returnbytes: bool = False)` takes image bytes or pil image object and outputs apf string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the possible max of 199 and uses the smallest one. returnbytes makes it return bytes instead of a string.
 
-`apf2.encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False)` takes image bytes or pil image object and outputs af2 string. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode. Prepalette is an already encoded APF2 palette you input into the encoder to make the colors deterministic. dodithering enables or disables dithering. returnbytes makes it return bytes instead of a string.
+`apf2.encode(img: bytes | Image.Image, lineskip: int = 1, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None)`
+
+takes image bytes or pil image object and outputs apf2 as a string or ascii bytes. lineskip is interleave value, findbestlineskip brute-forces different interleave values to the provided lineskip and uses the smallest one. legacy uses apf1-style 2 color data instead of a 95 color palette. trans sets transparency mode, with mode 0 being off, mode 1 being index 0 transparency (GIF-like, it overrides a color), and mode 2 being indexed alpha. pal allows you to manually force a smaller or larger palette anything over 95 will use APF2-1994's Dual Indexed Mode. Prepalette is an already encoded APF2 palette you input into the encoder to make the colors deterministic. dodithering enables or disables dithering. returnbytes makes it return bytes instead of a string. These options use the APF2-2000 mode: compress - disable RLE compression, allows for smaller file sizes where RLE is not beneficial. Topside_first makes the image scan top-to-bottom, like most formats. emit_redundant_flag - adds the implicit i flag explicitally to baseline 95 color images. mode - selects apf2 coding mode [0: 2 colors, 1: 95 colors, 2: 9025 colors, 3: near-truecolor, 4: near-truecolor with alpha, 5: truecolor, 6: truecolor with alpha, 7: quantized grayscale (based on 95 color mode), 8: 8-bit grayscale (based on 9025 color mode)], combine attempts to do cross-frame delta coding. avoid_run_breaks reduces the amount of transparency pixels emitted by combine, typically harms efficiency. width and height force the output resolution of the image. if both are specified, the output is streched to the specified resolution. if only 1 is present, the other is determined based on aspect ratio. If unspecfied, no scaling happens.
 
 `wbmp.encode(img: Image)` takes pil image object and outputs wbmp bytes
 
@@ -37,7 +39,7 @@ bruh is an intentionally terrible format made by facedev. info can be found [her
 
 `bruh.encode(img: Image)` takes pil image object and outputs bruh bytes
 
-`mqif.encode(img: list | Image.Image, transcolor: tuple = None)` 
+`mqif.encode(img: list | Image.Image, transcolor: tuple = None)` not fully implemented
 
 ### decoders:
 
@@ -45,7 +47,7 @@ bruh is an intentionally terrible format made by facedev. info can be found [her
 
 `apf.decode(apf: str, format: str = 'PNG', returnImageObject: bool = False)` takes apf string and outputs either image bytes in specified format or pil image object
 
-`apf2.decode(af2: str, format: str = 'PNG', returnImageObject: bool = False, provide_extra_data: bool = False)` Literally a dropin replacement for decodeapf. provide_extra_data outputs frame delay data if applicable
+`apf2.decode(af2: str, format: str = 'PNG', returnImageObject: bool = False, provide_extra_data: bool = False, composite_layers: bool = True)` Literally a dropin replacement for decodeapf. provide_extra_data outputs frame delay data if applicable, and composite_layers choses weather to return a single image if the non-animated image has layers or if it should return the layers
 
 `wbmp.decode(wbmp: bytes, format: str = 'PNG', returnImageObject: bool = False)` takes wbmp bytes and outputs either image bytes in specified format or pil image object
 
@@ -77,6 +79,8 @@ apftool provides many extensions tuples:
 
 `extensions_all` - all supported apftool extensions, useful for universal decoder
 
+`version` - reports apftool version
+
 ## dependancies
 
 `PIL (pillow)` is required
@@ -84,6 +88,12 @@ apftool provides many extensions tuples:
 `numpy` and `scikit-learn` are needed for high-speed APF2-1994 257+ Color Encoding, if missing the code will use a very slow fallback.
 
 ## changelog:
+
+1.1.3 - add version field, add width and height options to apf2 encoding
+
+1.1.2 - fix apftool
+
+1.1.1 - fix A2K's q and n modes (~ should map to 255 in those modes)
 
 1.1.0 - add APF2-2000 support, and add bg.fg support. Also you can now run findbestlineskip on animations. APF2-2000 is a major upgrade over APF2-1994 that adds Truecolor modes, internal alpha composting for layered images, cross-frame compression, and a lot more.
 
