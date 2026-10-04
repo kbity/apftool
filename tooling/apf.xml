@@ -76,5 +76,14 @@
     </magic>
   </mime-type>
 
+  <mime-type type="audio/x-aperture-audio">
+    <comment>Aperture Audio Format File</comment>
+    <glob pattern="*.aaf" weight="40"/>
+    <glob pattern="*.aaff" weight="60"/>
+    <magic priority="80">
+      <match value="APERTURE AUDIO FORMAT (c) 1986" type="string" offset="0" />
+    </magic>
+  </mime-type>
+
 
 </mime-info>
