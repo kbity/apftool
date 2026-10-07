@@ -348,7 +348,7 @@ class Apf2Plugin(Gimp.PlugIn):
             layer_mode = config.get_property("layers")
             combine = config.get_property("combine")
             delay = config.get_property("delay")
-            desc = config.get_property("description") or ""
+            desc = config.get_property("description").replace(",", ".") or ""
 
             # keep mode and transparency consistent
             if mode in (4, 6):
