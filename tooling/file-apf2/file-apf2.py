@@ -28,9 +28,9 @@ PIXEL_FORMAT = "R'G'B'A u8"
 
 # mode nick -> (apf2 mode number, label)
 MODES = [
-    ("index95", 1, "Indexed (mode 1, up to 95 colors, i)"),
+    ("legacy", 0, "Legacy 2-color (mode 0, l)"),
+    ("default", 1, "Indexed (mode 1, up to 95 colors, i)"),
     ("dual", 2, "Dual-index (mode 2, up to 9025 colors, d)"),
-    ("legacy", 0, "Legacy 2-color (mode 0)"),
     ("near", 3, "Near-truecolor (mode 3, q)"),
     ("nearalpha", 4, "Near-truecolor + alpha (mode 4, n)"),
     ("true", 5, "Truecolor (mode 5, T)"),
@@ -200,7 +200,7 @@ class Apf2Plugin(Gimp.PlugIn):
             for nick, num, label in MODES:
                 mode_choice.add(nick, num, label, label)
             proc.add_choice_argument(
-                "mode", "_Color mode", "APF2 color mode", mode_choice, "index95",
+                "mode", "_Color mode", "APF2 color mode", mode_choice, "default",
                 GObject.ParamFlags.READWRITE,
             )
 
