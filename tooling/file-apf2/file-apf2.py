@@ -5,11 +5,10 @@
 APF2 (Aperture Image Format) import/export plug-in for GIMP 3.x
 
 Install layout (the folder name MUST match the plug-in file name):
-
     <GIMP profile>/plug-ins/file-apf2/file-apf2.py   (this file, must be executable on Linux/macOS)
 
-GIMP's bundled Python also needs Pillow (PIL) for apf2.py; scikit-learn / numpy are optional
-(apf2.py falls back to its slow pure-Python quantizer without them).
+GIMP's bundled Python also needs Pillow (PIL) and apftool; scikit-learn / numpy are optional
+(apftool falls back to its slow pure-Python quantizer without them).
 """
 
 import os
@@ -22,9 +21,6 @@ gi.require_version("Gimp", "3.0")
 gi.require_version("GimpUi", "3.0")
 gi.require_version("Gegl", "0.4")
 from gi.repository import Gimp, GimpUi, Gegl, GObject, GLib  # noqa: E402
-
-# make "import apf2" find the codec sitting next to this file
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 PROC_LOAD = "file-apf2-load"
 PROC_EXPORT = "file-apf2-export"
