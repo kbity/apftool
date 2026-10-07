@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+APF2 (Aperture Image Format) import/export plug-in for GIMP 3.x
+
+Install layout (the folder name MUST match the plug-in file name):
+
+    <GIMP profile>/plug-ins/file-apf2/file-apf2.py   (this file, must be executable on Linux/macOS)
+    <GIMP profile>/plug-ins/file-apf2/apf2.py        (your APF2 codec module, saved under this name)
+
+GIMP's bundled Python also needs Pillow (PIL) for apf2.py; scikit-learn / numpy are optional
+(apf2.py falls back to its slow pure-Python quantizer without them).
+"""
+
+import os
+import re
+import sys
+
+import gi
+
+gi.require_version("Gimp", "3.0")
+gi.require_version("GimpUi", "3.0")
+gi.require_version("Gegl", "0.4")
+from gi.repository import Gimp, GimpUi, Gegl, GObject, GLib  # noqa: E402
+
+# make "import apf2" find the codec sitting next to this file
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+PROC_LOAD = "file-apf2-load"
+PROC_EXPORT = "file-apf2-export"
+PIXEL_FORMAT = "R'G'B'A u8"
+
+# mode nick -> (apf2 mode number, label)
+MODES = [
+    ("index95", 1, "Indexed (mode 1, up to 95 colors)"),
+    ("dual", 2, "Dual-index (mode 2, up to 9025 colors)"),
+    ("legacy", 0, "Legacy 2-color (mode 0)"),
+    ("near", 3, "Near-truecolor (mode 3, q)"),
+    ("nearalpha", 4, "Near-truecolor + alpha (mode 4, n)"),
+    ("true", 5, "Truecolor (mode 5, T)"),
+    ("truealpha", 6, "Truecolor + alpha (mode 6, A)"),
+    ("gray95", 7, "Grayscale, 95 levels (mode 7, g)"),
+    ("gray256", 8, "Grayscale, 256 levels (mode 8, G)"),
+]
+MODE_NUMBERS = {nick: num for nick, num, _ in MODES}
+
+TRANS_MODES = [
+    ("none", 0, "None"),
+    ("onebit", 1, "1-bit (transparent index / key color)"),
+    ("alpha", 2, "Full alpha (palette modes only)"),
+]
+TRANS_NUMBERS = {nick: num for nick, num, _ in TRANS_MODES}
+
+
+# --------------------------------------------------------------------------- helpers
+def _import_codecs():
+    from PIL import Image  # noqa: F401
+    from apftool import apf2  # noqa: F401
+
+    return Image, apf2
+
+
+def _error(procedure, message):
+    return procedure.new_return_values(
+        Gimp.PDBStatusType.EXECUTION_ERROR,
+        GLib.Error.new_literal(GLib.quark_from_string("file-apf2"), message, 0),
+    )
+
+
+def _pil_to_layer(image, pil_img, name):
+    pil_img = pil_img.convert("RGBA")
+    w, h = pil_img.size
+    layer = Gimp.Layer.new(
+        image, name, w, h, Gimp.ImageType.RGBA_IMAGE, 100.0, Gimp.LayerMode.NORMAL
+    )
+    buf = layer.get_buffer()
+    buf.set(Gegl.Rectangle.new(0, 0, w, h), PIXEL_FORMAT, pil_img.tobytes())
+    buf.flush()
+    layer.update(0, 0, w, h)
+    return layer
+
+
+def _layer_to_pil(Image, layer, canvas_size):
+    """Render a layer onto a transparent canvas-sized RGBA image."""
+    w, h = layer.get_width(), layer.get_height()
+    buf = layer.get_buffer()
+    raw = buf.get(
+        Gegl.Rectangle.new(0, 0, w, h), 1.0, PIXEL_FORMAT, Gegl.AbyssPolicy.NONE
+    )
+    limg = Image.frombytes("RGBA", (w, h), bytes(raw))
+    if (w, h) == tuple(canvas_size):
+        offs = layer.get_offsets()
+        # get_offsets returns (success, x, y) in GIMP 3
+        ox, oy = offs[-2], offs[-1]
+        if (ox, oy) == (0, 0):
+            return limg
+    else:
+        offs = layer.get_offsets()
+        ox, oy = offs[-2], offs[-1]
+    canvas = Image.new("RGBA", canvas_size, (0, 0, 0, 0))
+    canvas.paste(limg, (ox, oy))
+    return canvas
+
+
+def _as_layered_stream(raw):
+    """
+    If raw is a multistream APF2 *without* the m flag (i.e. layers that a decoder
+    composites), return a copy with 'm' added so apf2.decode() hands back every
+    stream instead of compositing them. Otherwise return None.
+    """
+    try:
+        text = raw.decode("ascii")
+    except UnicodeDecodeError:
+        return None
+    lines = [l for l in text.splitlines() if l]
+    if len(lines) < 5 or not lines[0].strip().startswith("APERTURE IMAGE FORMAT"):
+        return None
+    head = lines[1].strip().split(",")
+    if len(head) < 3 or "m" in head[1]:
+        return None
+    lines[1] = ",".join([head[0], head[1] + "m"] + head[2:])
+    return "\n".join(lines).encode("ascii")
+
+
+class FrameStack:
+    """
+    Minimal stand-in for an animated PIL image so apf2.encode() can iterate frames
+    without round-tripping through APNG/GIF (PIL merges identical neighbouring frames
+    when saving those, which would silently drop frames).
+    """
+
+    def __init__(self, frames, duration):
+        self._frames = frames
+        self._i = 0
+        self.is_animated = True
+        self.n_frames = len(frames)
+        for f in frames:
+            f.info["duration"] = duration
+
+    def seek(self, i):
+        if i < 0 or i >= len(self._frames):
+            raise EOFError
+        self._i = i
+
+    def tell(self):
+        return self._i
+
+    def __getattr__(self, name):
+        return getattr(self._frames[self._i], name)
+
+
+# --------------------------------------------------------------------------- plug-in
+class Apf2Plugin(Gimp.PlugIn):
+    def do_query_procedures(self):
+        return [PROC_LOAD, PROC_EXPORT]
+
+    def do_set_i18n(self, name):
+        return False
+
+    def do_create_procedure(self, name):
+        if name == PROC_LOAD:
+            proc = Gimp.LoadProcedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, self.load, None
+            )
+            proc.set_menu_label("APF2 image")
+            proc.set_documentation(
+                "Load an Aperture Image Format (APF/APF2) image",
+                "Loads APF, APF2, and A2K-extension images; multistream files "
+                "become one layer per frame.",
+                name,
+            )
+            proc.set_attribution("Aperture Science", "Aperture Science", "1993")
+            proc.set_mime_types("image/x-aperture-picture")
+            proc.set_extensions("apf,apf2,a2k,af2,aif2,ap2k,ap2")
+            proc.set_magics("0,string,APERTURE IMAGE FORMAT")
+            return proc
+
+        if name == PROC_EXPORT:
+            proc = Gimp.ExportProcedure.new(
+                self, name, Gimp.PDBProcType.PLUGIN, False, self.export, None
+            )
+            proc.set_image_types("*")
+            proc.set_menu_label("APF2 image")
+            proc.set_documentation(
+                "Export an Aperture Image Format (APF2) image",
+                "Exports the image as APF2 text. Multiple visible layers can be "
+                "exported as an animation (one frame per layer).",
+                name,
+            )
+            proc.set_attribution("Aperture Science", "Aperture Science", "1993")
+            proc.set_mime_types("image/x-aperture-picture")
+            proc.set_extensions("apf,apf2,a2k,af2,aif2,ap2k,ap2")
+            proc.set_capabilities(
+                Gimp.ExportCapabilities.CAN_HANDLE_RGB
+                | Gimp.ExportCapabilities.CAN_HANDLE_ALPHA
+                | Gimp.ExportCapabilities.CAN_HANDLE_LAYERS
+                | Gimp.ExportCapabilities.CAN_HANDLE_LAYERS_AS_ANIMATION
+                | Gimp.ExportCapabilities.NEEDS_CROP,
+                None,
+                None,
+            )
+
+            # --- options
+            mode_choice = Gimp.Choice.new()
+            for nick, num, label in MODES:
+                mode_choice.add(nick, num, label, label)
+            proc.add_choice_argument(
+                "mode", "_Color mode", "APF2 color mode", mode_choice, "index95",
+                GObject.ParamFlags.READWRITE,
+            )
+
+            proc.add_int_argument(
+                "palette-size", "_Palette size",
+                "Number of palette colors (modes 1 and 2 only; 1-95 for mode 1, up to 9025 for mode 2)",
+                2, 9025, 95, GObject.ParamFlags.READWRITE,
+            )
+
+            trans_choice = Gimp.Choice.new()
+            for nick, num, label in TRANS_MODES:
+                trans_choice.add(nick, num, label, label)
+            proc.add_choice_argument(
+                "transparency", "_Transparency",
+                "Transparency handling (modes 4 and 6 always use full alpha; "
+                "modes 3, 7 and 8 have none)",
+                trans_choice, "none", GObject.ParamFlags.READWRITE,
+            )
+
+            proc.add_boolean_argument(
+                "dither", "_Dither", "Floyd-Steinberg dithering (single images only)",
+                False, GObject.ParamFlags.READWRITE,
+            )
+            proc.add_boolean_argument(
+                "compress", "Run-length _compress",
+                "Disable to write an uncompressed (U) stream", True,
+                GObject.ParamFlags.READWRITE,
+            )
+            proc.add_boolean_argument(
+                "topside-first", "Scan _top-down",
+                "Scan from the top instead of the bottom (u flag)", False,
+                GObject.ParamFlags.READWRITE,
+            )
+            proc.add_int_argument(
+                "lineskip", "_Line skip", "Lineskip / interlace pass value",
+                1, 200, 1, GObject.ParamFlags.READWRITE,
+            )
+            proc.add_boolean_argument(
+                "find-best-lineskip", "Find _best line skip",
+                "Try every lineskip up to the value above and keep the smallest output",
+                False, GObject.ParamFlags.READWRITE,
+            )
+            layer_choice = Gimp.Choice.new()
+            layer_choice.add("flatten", 0, "Flatten visible layers", "Flatten visible layers into one image")
+            layer_choice.add("layers", 1, "Keep layers (multistream)", "One stream per visible layer, composited by the decoder (no m flag)")
+            layer_choice.add("animation", 2, "Layers as animation", "One animation frame per visible layer (m flag)")
+            proc.add_choice_argument(
+                "layers", "_Multiple layers",
+                "How to export an image with several visible layers (layer modes and "
+                "opacity are ignored for 'layers' and 'animation')",
+                layer_choice, "flatten", GObject.ParamFlags.READWRITE,
+            )
+            proc.add_boolean_argument(
+                "combine", "Cross-frame _combine",
+                "Animation only: only store pixels that changed from the previous frame (c flag)",
+                False, GObject.ParamFlags.READWRITE,
+            )
+            proc.add_int_argument(
+                "delay", "Frame _delay (ms)",
+                "Default frame delay; a layer name containing '(123ms)' on the "
+                "first frame overrides it",
+                1, 600000, 100, GObject.ParamFlags.READWRITE,
+            )
+            proc.add_string_argument(
+                "description", "D_escription", "Free-text description stored in the header",
+                "", GObject.ParamFlags.READWRITE,
+            )
+            return proc
+
+        return None
+
+    # ----------------------------------------------------------------- import
+    def load(self, procedure, run_mode, file, metadata, flags, config, data):
+        try:
+            Image, apf2 = _import_codecs()
+        except Exception as e:  # missing PIL, missing apf2.py, ...
+            return _error(procedure, f"APF2 plug-in could not import its codec: {e}"), flags
+
+        try:
+            with open(file.get_path(), "rb") as f:
+                raw = f.read()
+            layered = _as_layered_stream(raw)
+            result = apf2.decode(
+                layered or raw, returnImageObject=True, provide_extra_data=True
+            )
+        except Exception as e:
+            return _error(procedure, f"Could not decode APF2 file: {e}"), flags
+
+        if isinstance(result, tuple):  # multiple streams: (frames, delay)
+            frames, delay = result
+            if layered:  # multistream without m = layers, not an animation
+                delay = None
+        else:
+            frames, delay = [result], None
+
+        w, h = frames[0].size
+        image = Gimp.Image.new(w, h, Gimp.ImageBaseType.RGB)
+        for n, frame in enumerate(frames, 1):
+            if layered:
+                name = f"Layer {n}"
+            elif delay is not None:
+                name = f"Frame {n} ({delay}ms) (replace)"
+            else:
+                name = os.path.basename(file.get_path())
+            layer = _pil_to_layer(image, frame, name)
+            image.insert_layer(layer, None, 0)  # first frame ends up on the bottom
+        image.set_file(file)
+
+        retval = procedure.new_return_values(
+            Gimp.PDBStatusType.SUCCESS, GLib.Error()
+        )
+        retval.insert(1, GObject.Value(Gimp.Image, image))
+        return retval, flags
+
+    # ----------------------------------------------------------------- export
+    def export(self, procedure, run_mode, image, file, options, metadata, config, data):
+        if run_mode == Gimp.RunMode.INTERACTIVE:
+            GimpUi.init("file-apf2")
+            dialog = GimpUi.ProcedureDialog(procedure=procedure, config=config)
+            dialog.fill(None)
+            if not dialog.run():
+                dialog.destroy()
+                return procedure.new_return_values(
+                    Gimp.PDBStatusType.CANCEL, GLib.Error()
+                )
+            dialog.destroy()
+
+        try:
+            Image, apf2 = _import_codecs()
+        except Exception as e:
+            return _error(procedure, f"APF2 plug-in could not import its codec: {e}")
+
+        export_status, image = options.get_image(image)
+
+        try:
+            mode_nick = config.get_property("mode")
+            mode = MODE_NUMBERS[mode_nick]
+            pal = config.get_property("palette-size")
+            trans = TRANS_NUMBERS[config.get_property("transparency")]
+            dither = config.get_property("dither")
+            compress = config.get_property("compress")
+            topdown = config.get_property("topside-first")
+            lineskip = config.get_property("lineskip")
+            findbest = config.get_property("find-best-lineskip")
+            layer_mode = config.get_property("layers")
+            combine = config.get_property("combine")
+            delay = config.get_property("delay")
+            desc = config.get_property("description") or ""
+
+            # keep mode and transparency consistent
+            if mode in (4, 6):
+                trans = 2
+            elif mode in (3, 7, 8):
+                trans = 0
+            elif trans == 2 and mode in (0, 1, 2):
+                pass  # full alpha palette (a flag)
+            if mode == 0:
+                pal = 2
+            elif mode == 1:
+                pal = max(2, min(pal, 95))
+            elif mode == 2:
+                pal = max(2, min(pal, 9025))
+
+            canvas = (image.get_width(), image.get_height())
+            layers = [l for l in image.get_layers() if l.get_visible()]
+            if not layers:
+                return _error(procedure, "Nothing to export: no visible layers.")
+
+            multi = layer_mode in ("layers", "animation") and len(layers) > 1
+            if multi:
+                if layer_mode == "layers" and trans == 0:
+                    trans = 1  # the decoder composites layers, so they need transparency
+                if layer_mode == "layers":
+                    combine = False  # c only applies to animations
+                frames = [_layer_to_pil(Image, l, canvas) for l in reversed(layers)]
+                m = re.search(r"\((\d+)\s*ms\)", layers[-1].get_name() or "")
+                frame_delay = int(m.group(1)) if m else delay
+                src = FrameStack(frames if trans else [f.convert("RGB") for f in frames],
+                                 frame_delay)
+            else:
+                combine = False
+                merged = Gimp.Layer.new_from_visible(image, image, "merged")
+                pil_img = _layer_to_pil(Image, merged, canvas)
+                src = pil_img if trans else pil_img.convert("RGB")
+
+            kwargs = dict(
+                lineskip=lineskip,
+                findbestlineskip=findbest,
+                trans=trans,
+                pal=pal,
+                desc=desc,
+                dodithering=dither,
+                returnbytes=True,
+                compress=compress,
+                topside_first=topdown,
+                mode=mode,
+                combine=combine,
+            )
+            out = apf2.encode(src, **kwargs)
+
+            if multi and layer_mode == "layers":
+                # encode() marks any multi-frame image as animated ('m'); drop it so
+                # the decoder composites the streams as layers instead.
+                lines = out.decode("ascii").split("\n")
+                head = lines[1].split(",")
+                head[1] = head[1].replace("m", "")
+                lines[1] = ",".join(head)
+                out = "\n".join(lines).encode("ascii")
+
+            with open(file.get_path(), "wb") as f:
+                f.write(out)
+        except Exception as e:
+            return _error(procedure, f"Could not encode APF2 file: {e}")
+        finally:
+            if export_status == Gimp.ExportReturn.EXPORT:
+                image.delete()
+
+        return procedure.new_return_values(Gimp.PDBStatusType.SUCCESS, GLib.Error())
+
+
+Gimp.main(Apf2Plugin.__gtype__, sys.argv)
