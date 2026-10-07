@@ -266,7 +266,7 @@ class Apf2Plugin(Gimp.PlugIn):
             )
             proc.add_string_argument(
                 "description", "D_escription", "Free-text description stored in the header",
-                "", GObject.ParamFlags.READWRITE,
+                "Created with GIMP", GObject.ParamFlags.READWRITE,
             )
             return proc
 
