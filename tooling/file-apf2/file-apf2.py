@@ -213,6 +213,7 @@ class Apf2Plugin(Gimp.PlugIn):
             trans_choice = Gimp.Choice.new()
             for nick, num, label in TRANS_MODES:
                 trans_choice.add(nick, num, label, label)
+
             proc.add_choice_argument(
                 "transparency", "_Transparency",
                 "Transparency handling (modes 4 and 6 always use full alpha; "
@@ -220,10 +221,17 @@ class Apf2Plugin(Gimp.PlugIn):
                 trans_choice, "none", GObject.ParamFlags.READWRITE,
             )
 
-            proc.add_boolean_argument(
-                "dither", "_Dither", "Floyd-Steinberg dithering (single images only)",
-                False, GObject.ParamFlags.READWRITE,
+            dither_choice = Gimp.Choice.new()
+            dither_choice.add("none", 0, "None", "No dithering (best for lossy encoding)")
+            dither_choice.add("ordered", 1, "Bayer (fast)", "Ordered dithering, fast but not great")
+            dither_choice.add("fs", 2, "Floyd-Steinberg (good)", "Floyd dithering, good but not fast")
+
+            proc.add_choice_argument(
+                "dither", "_Dithering",
+                "Sets dithering model",
+                dither_choice, "none", GObject.ParamFlags.READWRITE,
             )
+
             proc.add_boolean_argument(
                 "compress", "Run-length _compress",
                 "Disable to write an uncompressed (U) stream", True,
@@ -247,6 +255,7 @@ class Apf2Plugin(Gimp.PlugIn):
             layer_choice.add("flatten", 0, "Flatten visible layers", "Flatten visible layers into one image")
             layer_choice.add("layers", 1, "Keep layers (multistream)", "One stream per visible layer, composited by the decoder (no m flag)")
             layer_choice.add("animation", 2, "Layers as animation", "One animation frame per visible layer (m flag)")
+
             proc.add_choice_argument(
                 "layers", "_Multiple layers",
                 "How to export an image with several visible layers (layer modes and "
@@ -264,6 +273,18 @@ class Apf2Plugin(Gimp.PlugIn):
                 "first frame overrides it",
                 1, 600000, 100, GObject.ParamFlags.READWRITE,
             )
+
+            proc.add_int_argument(
+                "run-quality", "_Run quality",
+                "Quality for Lossy RLE (100 = Lossless, 0 = Poor)",
+                0, 100, 100, GObject.ParamFlags.READWRITE,
+            )
+            proc.add_int_argument(
+                "motion-quality", "_Motion quality",
+                "Quality for Lossy Frame Deltas for animations (100 = Lossless, 0 = Poor)",
+                0, 100, 100, GObject.ParamFlags.READWRITE,
+            )
+
             proc.add_string_argument(
                 "description", "D_escription", "Free-text description stored in the header",
                 "Created with GIMP", GObject.ParamFlags.READWRITE,
@@ -320,6 +341,12 @@ class Apf2Plugin(Gimp.PlugIn):
         if run_mode == Gimp.RunMode.INTERACTIVE:
             GimpUi.init("file-apf2")
             dialog = GimpUi.ProcedureDialog(procedure=procedure, config=config)
+
+            spin = dialog.get_spin_scale("run-quality", 1.0)
+            spin.set_scale_limits(0, 100)
+            spin = dialog.get_spin_scale("motion-quality", 1.0)
+            spin.set_scale_limits(0, 100)
+
             dialog.fill(None)
             if not dialog.run():
                 dialog.destroy()
@@ -341,6 +368,12 @@ class Apf2Plugin(Gimp.PlugIn):
             pal = config.get_property("palette-size")
             trans = TRANS_NUMBERS[config.get_property("transparency")]
             dither = config.get_property("dither")
+            if dither == "none":
+                dither_mode = None
+                dither = False
+            else:
+                dither_mode = dither
+                dither = True
             compress = config.get_property("compress")
             topdown = config.get_property("topside-first")
             lineskip = config.get_property("lineskip")
@@ -349,6 +382,14 @@ class Apf2Plugin(Gimp.PlugIn):
             combine = config.get_property("combine")
             delay = config.get_property("delay")
             desc = config.get_property("description").replace(",", ".") or ""
+
+            runQ = config.get_property("run-quality")
+            difQ = config.get_property("motion-quality")
+
+            maxrunerror = 50-(runQ/2)
+            maxmotionerror = 50-(difQ/2)
+
+            # maxrunerror: float = 0, maxmotionerror: float = 0,
 
             # keep mode and transparency consistent
             if mode in (4, 6):
@@ -398,6 +439,9 @@ class Apf2Plugin(Gimp.PlugIn):
                 topside_first=topdown,
                 mode=mode,
                 combine=combine,
+                dither_mode=dither_mode,
+                maxrunerror=maxrunerror,
+                maxmotionerror=maxmotionerror,
             )
             out = apf2.encode(src, **kwargs)
 
