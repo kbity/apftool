@@ -85,9 +85,11 @@ apftool provides many extensions tuples:
 
 `PIL (pillow)` is required
 
-`numpy` and `scikit-learn` are needed for high-speed APF2-1994 257+ Color Encoding, if missing the code will use a very slow fallback.
+`numpy` and `scipy` are needed for high-quality, high-speed APF2 encoding, if missing the code will use a very slow and low quality fallback.
 
 ## changelog:
+
+1.2.0 - increase apfcli verbosity, add lossy encoding options. Allow apfcli to take its own formats as inputs and outputs, also adds a much better quantization algorithm and removes the limitations on indexed animations.
 
 1.1.3 - add version field, add width and height options to apf2 encoding
 

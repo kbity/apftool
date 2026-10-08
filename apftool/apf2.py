@@ -1,17 +1,16 @@
 from PIL import Image, ImageSequence
 from collections import Counter
-import io, textwrap
+import io, textwrap, math
 
 qmf = "basic"
 
 # try numpy and sklearn
 try:
     import numpy as np
-    from sklearn.cluster import MiniBatchKMeans
-    from sklearn.metrics import pairwise_distances_argmin
+    from .apf2quant import quantize_perceptual
     qmf = "sk"
 except Exception as e:
-    print(f"Importing sklearn or numpy failed, high-color images and images with alpha may encode slowly or not at all, and dithering will be unavailable for them!\n{e}")
+    print(f"Importing scipy or numpy failed, high-color images and images with alpha may encode slowly or not at all, dithering will be unavailable for them, and quality will be worse!\n{e}")
 
 # width and height are 320x200 for standard apf files
 apf2headertext = "APERTURE IMAGE FORMAT (c) 1993" # apf2 header
@@ -27,73 +26,8 @@ mapping = []
 for i in range(256):
     mapping.append(chr(quant_to_base95(i)+32))
 
-# fast sklearn version
-def quantize_most_frequent_sk(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False):
-    img = img.convert("RGBA")
-    arr = np.array(img, dtype=np.uint8)
-    flat = arr.reshape(-1, 4).astype(np.float32)
-
-    if palette is not None:
-        # ---- FIXED PALETTE MODE ----
-        palette_arr = np.array(palette, dtype=np.uint8)
-    else:
-        # ---- KMEANS MODE ----
-        kmeans = MiniBatchKMeans(
-            n_clusters=n_colors,
-            batch_size=10_000,
-            n_init="auto",
-            random_state=0
-        )
-        kmeans.fit(flat)
-        palette_arr = kmeans.cluster_centers_.astype(np.uint8)
-
-    if dither:
-        # Floyd-Steinberg dithering — operate on a float copy to accumulate error
-        h, w = arr.shape[:2]
-        buf = arr.astype(np.float32)  # (H, W, 4)
-
-        out_indices = np.empty((h, w), dtype=np.int32)
-
-        for y in range(h):
-            # Serpentine scan (alternating direction) reduces directional bias
-            xs = range(w) if y % 2 == 0 else range(w - 1, -1, -1)
-            for x in xs:
-                old = buf[y, x]
-                idx = pairwise_distances_argmin(old[np.newaxis], palette_arr)[0]
-                out_indices[y, x] = idx
-                new = palette_arr[idx].astype(np.float32)
-                err = old - new
-
-                # Distribute error to 4 neighbours (Floyd-Steinberg weights)
-                if y % 2 == 0:  # left-to-right
-                    if x + 1 < w:
-                        buf[y,     x + 1] += err * (7 / 16)
-                    if y + 1 < h:
-                        if x - 1 >= 0:
-                            buf[y + 1, x - 1] += err * (3 / 16)
-                        buf[y + 1, x    ] += err * (5 / 16)
-                        if x + 1 < w:
-                            buf[y + 1, x + 1] += err * (1 / 16)
-                else:           # right-to-left
-                    if x - 1 >= 0:
-                        buf[y,     x - 1] += err * (7 / 16)
-                    if y + 1 < h:
-                        if x + 1 < w:
-                            buf[y + 1, x + 1] += err * (3 / 16)
-                        buf[y + 1, x    ] += err * (5 / 16)
-                        if x - 1 >= 0:
-                            buf[y + 1, x - 1] += err * (1 / 16)
-
-        quantized = palette_arr[out_indices].reshape(arr.shape)
-    else:
-        labels = pairwise_distances_argmin(flat, palette_arr)
-        quantized = palette_arr[labels].reshape(arr.shape)
-
-    palette_out = [tuple(map(int, x)) for x in palette_arr]
-    return Image.fromarray(quantized, "RGBA"), palette_out
-
 # slow pure python version
-def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False): # for use with A and P>256 images, dithering unsupported for basic mode
+def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False, dither_mode: str = None): # for use with A and P>256 images, dithering unsupported for basic mode
     img = img.convert("RGBA")  # ensures consistent format
     pixels = list(img.getdata())
 
@@ -126,7 +60,9 @@ def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list 
     return out, palette
 
 if qmf == "sk":
-    quantize_most_frequent = quantize_most_frequent_sk
+    quantize_most_frequent = quantize_perceptual
+#if qmf == "sk": replaced by claude's perceptual quantizer. don't feel sad, the old one was also vibecoded.
+#    quantize_most_frequent = quantize_most_frequent_sk
 #elif qmf == "numpy":   removed the numpy backend because it was having problems
 #    quantize_most_frequent = quantize_most_frequent_numpy
 else:
@@ -207,6 +143,9 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
     # 4 - near-truecolor with alpha
     # 5 - truecolor (can be paired with t to store 3 levels of alpha)
     # 6 - truecolor with alpha
+
+    # 7 - 95-level Grayscale
+    # 8 - 8-bit Grayscale
     if mode == 3:
         r = mapping.index(inpt[0])
         g = mapping.index(inpt[1])
@@ -258,6 +197,15 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
         ac = (c//27)%3
 
         return r+rc, g+gc, b+bc, a+ac
+
+    elif mode == 7:
+        r = mapping.index(inpt[0])
+        return [r, r, r]
+
+    elif mode == 8:
+        ind = (ord(inpt[0])-32)*95
+        ind += (ord(inpt[1])-32)
+        return [ind, ind, ind]
     else:
         raise ValueError("Invalid/Unsupported Mode")
 
@@ -660,73 +608,60 @@ def slice_frames(img: Image, animated, trans):
     else:
         return img, None
 
-def reduce_to_apf2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None, dodithering: bool = False):
+def reduce_to_apf2_quality(img: Image, num_colors: int = 95, animated: bool = False, trans = 0, prepalette: list = None, dodithering: bool = False, useadvancedquant: bool = False, dither_mode: str = "fs", verbose: bool = False):
     trans = int(trans)
     if animated:
-        # avoid expensive repeated hi-color quantize computing of every frame
-        if trans == 2:
-            trans = 1
-        if num_colors > 256:
-            num_colors = 256
-            if trans:
-                num_colors = 255
-            print("Animation Detected, capping colors to 255/256")
-        if dodithering:
-            print("Animated APF2s do not get dithered, sorry.")
-
-        ifuckinghatequantize = (255, 0, 255)
-
         frames = []
         frametiming = 0
-        if trans:
-            for frame in ImageSequence.Iterator(img):
-                if not frametiming:
-                    frametiming = frame.info.get("duration", img.info.get("duration", 0))
 
-                frame = frame.convert("RGBA")
-                background = Image.new("RGBA", frame.size, ifuckinghatequantize + (255,))
-                composited = Image.alpha_composite(background, frame)
-                frames.append(composited.convert("RGB"))
-        else:
-            for frame in ImageSequence.Iterator(img):
-                if not frametiming:
-                    frametiming = frame.info.get("duration", img.info.get("duration", 0))
-                frames.append(frame.copy().convert("RGB"))
+        for frame in ImageSequence.Iterator(img):
+            if not frametiming:
+                frametiming = int(frame.info.get("duration", img.info.get("duration", 0)))
+            frames.append(frame.copy())
 
         widths, heights = zip(*(f.size for f in frames))
         total_width = max(widths)
         total_height = sum(heights)
-        combined = Image.new("RGB", (total_width, total_height))
+        if trans == 2:
+            combined = Image.new("RGBA", (total_width, total_height))
+        else:
+            combined = Image.new("RGB", (total_width, total_height))
         y_offset = 0
 
         for frame in frames:
             combined.paste(frame, (0, y_offset))
             y_offset += frame.height
 
-        if trans:
-            combined_p = combined.convert("P", palette=Image.ADAPTIVE, colors=num_colors-1, dither=Image.NONE)
-
-            pal = combined_p.getpalette()
-            pal = [255, 0, 255] + pal
-            combined_p.putpalette(pal)
+        if trans == 2:
+            _, prepalette = quantize_most_frequent(combined, num_colors-1, prepalette)
+            prepalette = [(0, 0, 0, 0)] + prepalette # hack to make cross-frame trans = 2 not break
+        elif trans == 1:
+            _, prepalette = quantize_most_frequent(combined, num_colors-1, prepalette)
+            prepalette = [(255, 0, 255, 0)] + prepalette
         else:
-            combined_p = combined.convert("P", palette=Image.ADAPTIVE, colors=num_colors-1, dither=Image.NONE)
+            _, prepalette = quantize_most_frequent(combined, num_colors, prepalette)
+        if verbose:
+            print("Generated Animation Palette!")
 
         frames_p = []
-        for frame in frames:
-            f_p = frame.quantize(palette=combined_p, dither=Image.NONE)
-            if trans:
-                f_p.info["transparency"] = 0
+        for i, frame in enumerate(frames):
+            f_p, _ = quantize_most_frequent(frame, num_colors, prepalette, dodithering, dither_mode = dither_mode)
             frames_p.append(f_p)
+            if verbose:
+                print(f"Quantized frame {i+1}/{len(frames)}")
 
-        raw_palette = combined_p.getpalette()[:num_colors*3]
         seen = set()
-        palette = [tuple(raw_palette[i:i+3]) for i in range(0, len(raw_palette), 3) if not (tuple(raw_palette[i:i+3]) in seen or seen.add(tuple(raw_palette[i:i+3])))]
 
-        return frames_p, palette, frametiming, trans
+        npp = []
+        if not trans == 2: # remove whatever
+            for ind in prepalette:
+                npp.append((ind[0], ind[1], ind[2]))
+            prepalette = npp
+
+        return frames_p, prepalette, frametiming, trans
     else:
-        if trans == 2 or num_colors > 256 or prepalette:
-            img, palette = quantize_most_frequent(img, num_colors, prepalette, dodithering)
+        if trans == 2 or num_colors > 256 or prepalette or useadvancedquant:
+            img, palette = quantize_most_frequent(img, num_colors, prepalette, dodithering, dither_mode = dither_mode)
             if trans != 2:
                 palette_na = []
                 for col in palette:
@@ -855,7 +790,26 @@ def order_pixels(bitmap, h, lineskip, topside_first):
 
     return revmap
 
-def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, compress: bool, topside_first: bool, mode: int, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False, transmag: bool = False):
+def calc_error(currentrun, pixel, maxerror, foofcontrol = False):
+    if foofcontrol and pixel == (255, 0, 255):
+        if (pixel == currentrun):
+            return True
+        else:
+            return False
+
+    if currentrun is None:
+        return False
+
+    if len(currentrun) == 4 and len(pixel) == 4:
+        if currentrun[3] != pixel[3]:
+            return False
+
+    re = abs(currentrun[0]-pixel[0])
+    ge = abs(currentrun[1]-pixel[1])
+    be = abs(currentrun[2]-pixel[2])
+    return (( re * 2 + ge * 4 + be ) / 5) <= maxerror
+
+def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, compress: bool, topside_first: bool, mode: int, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False, transmag: bool = False, maxmotionerror: float = 0, maxrunerror: float = 0):
     if mode <3: # heart
         raise ValueError("Modes 0, 1, and 2 should not be flex encoded!")
 
@@ -881,6 +835,7 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
 
     runcounter = 0
     currentrun = None
+    currentrun_pixel = None # for error thing
     runlens = []
 
     revmap = order_pixels(bitmap, h, lineskip, topside_first)
@@ -909,7 +864,13 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
             pixel = revmap[y][x]
             if prevrev:
                 if not avoid_run_breaks or (not (runcounter>1 and not currentrun in transtuples)):
-                    if pixel == prevrev[y][x]:
+                   # lossy motion encoding mode
+                    if maxmotionerror:
+                        cont = calc_error(prevrev[y][x], pixel, maxmotionerror)
+                    else:
+                        cont = (pixel == prevrev[y][x])
+
+                    if cont:
                         pixel = (255, 0, 255) if transmag else (0,0,0,0)
                         isTransPix = True
 
@@ -957,7 +918,13 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
                 if not isTransPix and (transmag and curpixval == "~ ~"):
                     curpixval = "~!~"
 
-            if currentrun == curpixval:
+            # lossy RLE encoding mode
+            if maxrunerror and not (runcounter+1 > 94):
+                cont = calc_error(currentrun_pixel, pixel, maxrunerror, transmag)
+            else:
+                cont = (currentrun == curpixval)
+
+            if cont:
                 if (runcounter+1 > 94) or (not compress): # dont compress
                     if currentrun is not None:
                         runlens.append([curpixval, runcounter])
@@ -971,6 +938,9 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
                     runlens.append([currentrun, runcounter])
                 runcounter = 1
                 currentrun = curpixval
+                currentrun_pixel = pixel
+                if not isTransPix and (transmag and pixel == (255, 0, 255)):
+                    currentrun_pixel = (255, 2, 255)
 
     if runcounter > 0:
         if trans and currentrun[3] == 0:
@@ -983,7 +953,7 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
     total = sum(rldb)
     return runlens
 
-def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False, prepalette: str = None, compress: bool = True, topside_first: bool = False, palette_only: bool = False, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False):
+def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: int, trans = 0, dim: bool = False, prepalette: str = None, compress: bool = True, topside_first: bool = False, palette_only: bool = False, combine: bool = False, prevframe: list = None, avoid_run_breaks: bool = False, maxmotionerror: float = 0, maxrunerror: float = 0, useadvancedquant: bool = False):
     trans = int(trans)
     colpal = {}
     colpalbnr = {}
@@ -1066,10 +1036,21 @@ def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: in
             pixel = revmap[y][x]
             if prevrev:
                 if not avoid_run_breaks or (not (runcounter>1 and not currentrun == (0,0,0,0))):
-                    if pixel == prevrev[y][x]:
+                   # lossy motion encoding mode
+                    if maxmotionerror:
+                        cont = calc_error(prevrev[y][x], pixel, maxmotionerror)
+                    else:
+                        cont = (pixel == prevrev[y][x])
+                    if cont:
                         pixel = (0,0,0,0)
 
-            if currentrun == pixel:
+            # lossy RLE encoding mode
+            if maxrunerror and not (runcounter+1 > 94):
+                cont = calc_error(currentrun, pixel, maxrunerror)
+            else:
+                cont = (currentrun == pixel)
+
+            if cont:
                 if (runcounter+1 > 94) or (not compress): # dont compress
                     if currentrun is not None:
                         if not currentrun in colpalbnr:
@@ -1101,12 +1082,17 @@ def generate_runs_apf2(bitmap: list, palette: list, lineskip: int, w: int, h: in
     return runlens, apf2pal
 
 # wrapper function to encode the data
-def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress):
+def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress, verbose, maxmotionerror, maxrunerror):
     apf2pal = None
 
     if legacy:
         outputs = []
+        animated = (len(bitmaps) > 1)
+        inc = 0
         for bitmap in bitmaps:
+            if verbose and animated:
+                print(f"Encoding frame {inc+1}/{len(bitmaps)}...")
+            inc+=1
             temp = []
             runlens = generate_runs_apf2_l(bitmap, lineskip, w, h, topside_first, bg, trans)
             for num in runlens:
@@ -1118,13 +1104,17 @@ def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_fir
 
     elif gray or truecolor:
         outputs = []
+        animated = (len(bitmaps) > 1)
+
         for bm in range(len(bitmaps)):
+            if verbose and animated:
+                print(f"Encoding frame {bm+1}/{len(bitmaps)}...")
             temp = []
             prevframe = None
             if bm != 0 and combine:
                 prevframe = bitmaps[bm-1]
 
-            runlens = generate_runs_apf2_f(bitmaps[bm], lineskip, w, h, trans, compress, topside_first, mode, combine, prevframe, avoid_run_breaks, transmag)
+            runlens = generate_runs_apf2_f(bitmaps[bm], lineskip, w, h, trans, compress, topside_first, mode, combine, prevframe, avoid_run_breaks, transmag, maxmotionerror, maxrunerror)
             for num in runlens:
                 temp.append(num[0])
                 if compress:
@@ -1139,14 +1129,17 @@ def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_fir
     else:
         outputs = []
         _, apf2pal = generate_runs_apf2(bitmaps[0], palette, lineskip, w, h, trans, dim, prepalette, compress, topside_first, True)
+        animated = (len(bitmaps) > 1)
 
         for bm in range(len(bitmaps)):
+            if verbose and animated:
+                print(f"Encoding frame {bm+1}/{len(bitmaps)}...")
             temp = []
             prevframe = None
             if bm != 0 and combine:
                 prevframe = bitmaps[bm-1]
 
-            runlens, _ = generate_runs_apf2(bitmaps[bm], palette, lineskip, w, h, trans, dim, prepalette, compress, topside_first, False, combine, prevframe, avoid_run_breaks)
+            runlens, _ = generate_runs_apf2(bitmaps[bm], palette, lineskip, w, h, trans, dim, prepalette, compress, topside_first, False, combine, prevframe, avoid_run_breaks, maxmotionerror, maxrunerror)
             for num in runlens:
                 temp.append(num[0])
                 if compress:
@@ -1166,7 +1159,7 @@ def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_fir
 
     return output, apf2pal
 
-def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None):
+def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None, maxrunerror: float = 0, maxmotionerror: float = 0, verbose: bool = False, useadvancedquant: bool = True, dither_mode: str = "fs"):
     frametiming = None
     bakedpal = None
     dim = False
@@ -1276,7 +1269,7 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
     if legacy and not find_bgfg:
         img, frametiming = reduce_to_apf_in_apf2_quality(img, animated)
     elif not truecolor and not gray:
-        img, palette, frametiming, trans = reduce_to_apf2_quality(img, pal, animated, trans, bakedpal, dodithering)
+        img, palette, frametiming, trans = reduce_to_apf2_quality(img, pal, animated, trans, bakedpal, dodithering, useadvancedquant, dither_mode, verbose)
     else:
         img, frametiming = slice_frames(img, animated, trans)
 
@@ -1427,16 +1420,20 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
 
         for lsk in range(lineskip):
             lsk+=1
-            output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lsk, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress)
+            if verbose:
+                print(f"trying lineskip = {lsk}")
+            output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lsk, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress, verbose, maxmotionerror, maxrunerror)
             all_outputs[str(lsk)] = output
         for lsk in all_outputs:
             if outsize > len(all_outputs[lsk])+len(lsk):
                 output = all_outputs[lsk]
                 outsize = len(all_outputs[lsk])+len(lsk)
                 lineskip = int(lsk)
+            if verbose:
+                print(f"Smallest: {lineskip}")
         metadata.append(str(lineskip))
     else:
-        output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress)
+        output, apf2pal = encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_first, bg, trans, avoid_run_breaks, transmag, mode, combine, palette, dim, prepalette, compress, verbose, maxmotionerror, maxrunerror)
 
 
     if desc or frametiming:
@@ -1468,6 +1465,17 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
 
     apflist.append(output)
     apftext = "\n".join(apflist)
+
+    if verbose:
+        if uses2000extensions:
+            version = 2000
+        elif uses1994extensions:
+            version = 1994
+        else:
+            version = 1993
+        print(f"APF2 Version: {version}")
+        print(f"APF2 Header Line: {apflist[1]}")
+
     if returnbytes:
         return apftext.encode()
     else:
