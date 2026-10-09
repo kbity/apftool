@@ -166,7 +166,7 @@ class Apf2Plugin(Gimp.PlugIn):
             )
             proc.set_attribution("Aperture Science", "Aperture Science", "1993")
             proc.set_mime_types("image/x-aperture-picture")
-            proc.set_extensions("apf,apf2,a2k,af2,aif2,ap2k,ap2")
+            proc.set_extensions("apf,apf2,a2k,af2,aif2,ap2k,ap2,a2c,a2ci,a2g,a2b,apc")
             proc.set_magics("0,string,APERTURE IMAGE FORMAT")
             return proc
 
