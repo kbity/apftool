@@ -36,6 +36,9 @@ encoding:
 --quality=INT - (APF2) (0 to 100) sets both --run-quality and --motion-quality [Alias: -Q=INT]
 --pillow - (APF2) use pillow's quantizer [Alias: -P]
 --bayer - (APF2) use faster bayer/ordered dithering for perceptual mode instead of the slower, but prettier floyd-steinberg
+--compressor=[bzip2, gzip, asciipak, none] - (APF2) set APF2 post-compressor
+--compresslevel=[1-9] - (APF2) set compression level for apf2 compressor (gzip/bzip2) (default: 9)
+--nowrap - (APF2) disable the Compressed APF2 wrapper on compressed APF2 Files
 --mode=INT - (APF2) color mode (specified in A2K) for APF2. [Alias: -M=INT]
     0 - 2 colors
     1 - 95 colors
@@ -75,12 +78,12 @@ TODO: MQIF encoding
     lineskip = None
     dither = False
     description = ""
-    if opext in apftool.extensions_apf2:
-        wid = None
-        hei = None
-    else:
+    if opext in apftool.extensions_otb:
         wid = 255
         hei = 255
+    else:
+        wid = None
+        hei = None
     transcolor = None
     flip = False
     compress = True
@@ -91,6 +94,9 @@ TODO: MQIF encoding
     maxrunerror = 0
     useadvancedquant = True
     dither_mode = "fs"
+    compressor = None
+    wrapper = True
+    compresslevel = 9
     if args:
         if "--findbestlineskip" in args:
             fbls = True
@@ -114,6 +120,8 @@ TODO: MQIF encoding
             useadvancedquant = False
         if "--bayer" in args:
             dither_mode = "ordered"
+        if "--nowrap" in args:
+            wrapper = False
         for arg in args:
             if arg.startswith("--desc=") or arg.startswith("-D="):
                 description = arg.replace("--desc=", "").replace("-D=", "")
@@ -131,10 +139,11 @@ TODO: MQIF encoding
             if arg.startswith("--height=") or arg.startswith("-H="):
                 hei = int(arg.replace("--height=", "").replace("-H=", ""))
 
-            if arg.startswith("--mode="):
-                mode = int(arg.replace("--mode=", ""))
-            if arg.startswith("-M="):
-                mode = int(arg.replace("-M=", ""))
+            if arg.startswith("--mode=") or arg.startswith("-M="):
+                mode = int(arg.replace("--mode=", "").replace("-M=", ""))
+
+            if arg.startswith("--compresslevel="):
+                compresslevel = int(arg.replace("--compresslevel=", ""))
 
             if arg.startswith("--quality=") or arg.startswith("-Q="):
                 qual = int(arg.replace("--quality=", "").replace("-Q=", ""))/2
@@ -155,6 +164,9 @@ TODO: MQIF encoding
                 tcg = int(transcolor_hex[2:4], 16)
                 tcb = int(transcolor_hex[4:6], 16)
                 transcolor = (tcr, tcg, tcb)
+
+            if arg.startswith("--compressor="):
+                compressor = arg.replace("--compressor=", "")
 
         if mode is None:
             if maxpalette > 9025 and 857375 >= maxpalette:
@@ -203,8 +215,8 @@ TODO: MQIF encoding
         elif opext in apftool.extensions_mqif:
             encoded = apftool.mqif.encode(img_bytes, transcolor)
 
-        elif opext in apftool.extensions_apf2:
-            encoded = apftool.apf2.encode(img_bytes, lineskip=lineskip, findbestlineskip=fbls, legacy=legacy, trans=trans, pal=maxpalette, desc=description, prepalette= None, dodithering=dither, returnbytes=True, compress=compress, topside_first=flip, mode=mode, combine=combine, avoid_run_breaks=avoid_run_breaks, width=wid, height=hei, maxrunerror = maxrunerror, maxmotionerror = maxmotionerror, verbose = True, useadvancedquant=useadvancedquant, dither_mode=dither_mode)
+        elif opext in apftool.extensions_apf2 or opext in apftool.extensions_capf2:
+            encoded = apftool.apf2.encode(img_bytes, lineskip=lineskip, findbestlineskip=fbls, legacy=legacy, trans=trans, pal=maxpalette, desc=description, prepalette= None, dodithering=dither, returnbytes=True, compress=compress, topside_first=flip, mode=mode, combine=combine, avoid_run_breaks=avoid_run_breaks, width=wid, height=hei, maxrunerror = maxrunerror, maxmotionerror = maxmotionerror, verbose = True, useadvancedquant=useadvancedquant, dither_mode=dither_mode, compressor=compressor, wrapper=wrapper, compresslevel=compresslevel)
 
         else:
             raise ValueError("Unsupported Image Format!")

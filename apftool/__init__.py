@@ -6,6 +6,7 @@ from .apfcli import main as cli
 extensions = (".apf", ".apf2", ".aif", ".af2", ".ap2", ".aif2", ".a2k", ".ap2k")
 extensions_apf = (".apf", ".aif")
 extensions_apf2 = (".apf2", ".af2", ".ap2", ".aif2", ".a2k", ".ap2k")
+extensions_capf2 = (".a2g", ".a2c", ".a2ci", ".apc", ".aq2", ".aqf", ".a2b")
 extensions_wbmp = (".wbmp", ".wbitmap", ".wbm")
 extensions_otb = (".otb", ".ota", ".otab")
 extensions_bruh = (".bruh", ".brh")
@@ -13,10 +14,10 @@ extensions_mqif = (".mqif", ".mqi")
 
 extensions_txt = (".txt", ".text") # txt is seen as a generic container for apf/apf2 because they're just txt files
 
-version = "1.2.0"
+version = "1.2.1"
 
 extensions_all = []
-extensions_all.extend(extensions_apf+extensions_apf2+extensions_wbmp+extensions_otb+extensions_bruh+extensions_mqif)
+extensions_all.extend(extensions_apf+extensions_apf2+extensions_capf2+extensions_wbmp+extensions_otb+extensions_bruh+extensions_mqif)
 
 def decode(data, format: str = None, returnImageObject: bool = False, provide_extra_data=True):
     if isinstance(data, str):
@@ -25,7 +26,7 @@ def decode(data, format: str = None, returnImageObject: bool = False, provide_ex
         return apf2.decode(data, format, returnImageObject) # apf and af2 decoder
 
     elif isinstance(data, bytes):
-        if data.startswith(b'APERTURE IMAGE FORMAT (c) '): # this makes me GLaD
+        if data.startswith(b'APERTURE IMAGE FORMAT (c) ') or data.startswith(b'APF2') or data.startswith(b'BZh') or data.startswith(b'\x1f\x8b\x08') or data.startswith(b'\x83\x42\x2D\x2A\x95\x69\x45\x41'): # this makes me GLaD
             if format is None:
                 format = "PNG"
             return apf2.decode(data, format, returnImageObject, provide_extra_data=provide_extra_data)
@@ -60,7 +61,7 @@ def decode(data, format: str = None, returnImageObject: bool = False, provide_ex
             return otb.decode(data, format, returnImageObject) # assume otb if it doesnt look like a wbmp or doesnt taste like a bruh
 
         else:
-            Exception(f"decoding failed! {e}. this likely means the format isnt supported by apftool.")
+            Exception(f"decoding failed!. this likely means the format isnt supported by apftool.")
 
     else:
         raise Exception("Invalid data! Must be bytes or str")

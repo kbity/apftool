@@ -2,6 +2,15 @@ from PIL import Image, ImageSequence
 from collections import Counter
 import io, textwrap, math
 
+compressgood = False
+
+from . import asciipak
+try:
+    import gzip, bz2
+    compressgood = True
+except Exception as e:
+    print(f"Importing gzip or bz2 failed, compression will be limited to ascii packing\n{e}")
+
 qmf = "basic"
 
 # try numpy and sklearn
@@ -390,7 +399,29 @@ def diff_images(base, overlay, magenter = False):
 
 def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = False, provide_extra_data: bool = False, composite_layers: bool = True):
     if type(apf2) == bytes:
-        apf2 = apf2.decode("ascii")
+        if apf2.startswith(b"APF2"):
+            compressed_blob = apf2[6:]
+            alg = apf2[4:6]
+            if alg == b'b2':
+                apf2 = bz2.decompress(compressed_blob)
+            elif alg == b'gz':
+                apf2 = gzip.decompress(compressed_blob)
+            elif alg == b'ci':
+                apf2 = asciipak.decompress(compressed_blob)
+            else:
+                raise Exception("Invalid/Unsupported Compression Algorithm")
+            apf2 = apf2.decode("ascii")
+        elif apf2.startswith(b'BZh'):
+            apf2 = bz2.decompress(apf2)
+            apf2 = apf2.decode("ascii")
+        elif apf2.startswith(b'\x1f\x8b\x08'):
+            apf2 = gzip.decompress(apf2)
+            apf2 = apf2.decode("ascii")
+        elif apf2.startswith(b'\x83\x42\x2D\x2A\x95\x69\x45\x41'):
+            apf2 = asciipak.decompress(apf2)
+            apf2 = apf2.decode("ascii")
+        else: # also add the check for unwrapped gzip/bzip2 apf2 here
+            apf2 = apf2.decode("ascii")
 
     apf_list = apf2.splitlines()
     apf_lines = []
@@ -1159,11 +1190,23 @@ def encode_wrapper(legacy, bitmaps, gray, truecolor, lineskip, w, h, topside_fir
 
     return output, apf2pal
 
-def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None, maxrunerror: float = 0, maxmotionerror: float = 0, verbose: bool = False, useadvancedquant: bool = True, dither_mode: str = "fs"):
+def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: bool = False, legacy: bool = False, trans = False, pal: int = 95, desc: str = "", prepalette: str = None, dodithering: bool = False, returnbytes: bool = False, compress: bool = True, topside_first: bool = False, emit_redundant_flag: bool = False, mode: int = None, combine: bool = False, avoid_run_breaks: bool = False, width: int = None, height: int = None, maxrunerror: float = 0, maxmotionerror: float = 0, verbose: bool = False, useadvancedquant: bool = True, dither_mode: str = "fs", compressor: str = None, wrapper: bool = True, compresslevel: int = 9):
     frametiming = None
     bakedpal = None
     dim = False
     transmag = False
+
+    if not compressor in (None, "none", "bzip2", "gzip", "asciipak", "squeeze"):
+        raise Exception('Error: Invalid Compressor! Options: none, bzip2, gzip, asciipak, squeeze')
+
+    if compressor == "squeeze":
+        raise Exception('Error: squeeze is not currently supported by apftool!')
+
+    if compressor in ("bzip2", "gzip") and not compressgood:
+        raise Exception('Error: bzip2 and gzip is not currently supported by your python install!')
+
+    if compressor == "none":
+        compressor = None # set it to the real nonetype
 
     trans = int(trans) # compatability filter
     if trans > 2:
@@ -1476,7 +1519,27 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
         print(f"APF2 Version: {version}")
         print(f"APF2 Header Line: {apflist[1]}")
 
-    if returnbytes:
-        return apftext.encode()
+    if compressor is None:
+        if returnbytes:
+            return apftext.encode()
+        else:
+            return apftext
     else:
-        return apftext
+        apfbin = apftext.encode()
+        #  "none", "bzip2", "gzip", "asciipak", "squeeze"
+        wraphead = b"APF2"
+        if compressor == "bzip2":
+            apfbin_c = bz2.compress(apfbin, compresslevel=compresslevel)
+            wraphead+=b"b2"
+        elif compressor == "gzip":
+            apfbin_c = gzip.compress(apfbin, compresslevel=compresslevel)
+            wraphead+=b"gz"
+        elif compressor == "squeeze":
+            apfbin_c = squeeze.compress(apfbin)
+            wraphead+=b"sq"
+        else:
+            apfbin_c = asciipak.compress(apfbin)
+            wraphead+=b"ci"
+        if wrapper:
+            apfbin_c = wraphead+apfbin_c
+        return apfbin_c
