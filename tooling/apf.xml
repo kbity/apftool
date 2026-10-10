@@ -117,4 +117,12 @@
     </magic>
   </mime-type>
 
+  <mime-type type="application/x-squeeze">
+    <comment>Squeezed File</comment>
+    <glob pattern="*.sq"/>
+    <magic priority="85">
+      <match type="string" offset="0" value="v\xff"/>
+    </magic>
+  </mime-type>
+
 </mime-info>
