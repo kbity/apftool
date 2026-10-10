@@ -85,41 +85,33 @@
     </magic>
   </mime-type>
 
-  <mime-type type="image/x-aperture-picture-compressed">
-    <comment>Compressed Aperture Picture Format image</comment>
-    <glob pattern="*.a2g"/>
-    <glob pattern="*.a2b"/>
-    <glob pattern="*.a2c"/>
-    <glob pattern="*.aq2"/>
-    <magic priority="50">
-      <match value="APF2" type="string" offset="0" />
-    </magic>
-  </mime-type>
-
   <mime-type type="image/x-aperture-picture-compressed+gzip">
-    <comment>Compressed Aperture Picture Format image</comment>
+    <comment>Gzip-Compressed Aperture Picture Format image</comment>
     <glob pattern="*.a2g"/>
     <magic priority="90">
       <match value="APF2gz" type="string" offset="0" />
     </magic>
   </mime-type>
   <mime-type type="image/x-aperture-picture-compressed+x-bzip2">
-    <comment>Compressed Aperture Picture Format image</comment>
+    <comment>Bzip2-Compressed Aperture Picture Format image</comment>
     <glob pattern="*.a2b"/>
     <magic priority="90">
       <match value="APF2b2" type="string" offset="0" />
     </magic>
   </mime-type>
   <mime-type type="image/x-aperture-picture-compressed+x-squeeze">
-    <comment>Compressed Aperture Picture Format image</comment>
+    <comment>Squeeze-Compressed Aperture Picture Format image</comment>
     <glob pattern="*.aq2"/>
+    <glob pattern="*.aqf"/>
     <magic priority="90">
       <match value="APF2sq" type="string" offset="0" />
     </magic>
   </mime-type>
   <mime-type type="image/x-aperture-picture-compressed+x-asciipak">
-    <comment>Compressed Aperture Picture Format image</comment>
+    <comment>ASCIIPak-Compressed Aperture Picture Format image</comment>
     <glob pattern="*.a2c"/>
+    <glob pattern="*.apc"/>
+    <glob pattern="*.a2ci"/>
     <magic priority="90">
       <match value="APF2ci" type="string" offset="0" />
     </magic>
