@@ -89,6 +89,10 @@ apftool provides many extensions tuples:
 
 ## changelog:
 
+1.2.3 - add +1 bias for near-truecolor modes, reducing the darkening problem 
+
+1.2.2 - add support for squeeze, improve handling for numpy/scipy not being installed. Signifigant performance improvement for Truecolor modes.
+
 1.2.1 - add support for 3 of apf2's compressed modes [bzip2, gzip, ascii packing]
 
 1.2.0 - increase apfcli verbosity, add lossy encoding options. Allow apfcli to take its own formats as inputs and outputs, also adds a much better quantization algorithm and removes the limitations on indexed animations.

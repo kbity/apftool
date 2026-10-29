@@ -1,6 +1,6 @@
 from PIL import Image, ImageSequence
 from collections import Counter
-import io, textwrap, math
+import io, textwrap, math, squeeze
 
 compressgood = False
 
@@ -32,8 +32,12 @@ def quant_to_base95(g: int):
     return round(g/X)
 
 mapping = []
-for i in range(256):
+for i in range(257): # +1 to cover bias +1
     mapping.append(chr(quant_to_base95(i)+32))
+mapping_invert = {}
+for i, c in enumerate(mapping):
+    if not c in mapping_invert:
+        mapping_invert[c] = i
 
 # slow pure python version
 def quantize_most_frequent_basic(img: Image.Image, n_colors: int, palette: list = None, dither: bool = False, dither_mode: str = None): # for use with A and P>256 images, dithering unsupported for basic mode
@@ -81,20 +85,11 @@ else:
 def split_datapoints(data: str, datlen: int):
     leng = len(data)
 
-    trunc = False
-    if not leng%datlen == 0:
+    if leng % datlen:
         print("Error: Data must be divisible by the apf2 segment length! Attempting decode anyways...")
-        trunc = True
+        leng -= leng % datlen
 
-    split_points = []
-
-    for n in range(0, leng, datlen):
-        split_points.append(data[n:(n+datlen)])
-
-    if trunc:
-        split_points.pop(-1)
-
-    return split_points
+    return [data[n:n + datlen] for n in range(0, leng, datlen)]
 
 def apf2_apfdecodedata(data: str, h: int, w: int, apfbuffer: list, lineskip: int, pals: list, trans: bool = False, topdown: bool = False):
     x = 0
@@ -156,19 +151,19 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
     # 7 - 95-level Grayscale
     # 8 - 8-bit Grayscale
     if mode == 3:
-        r = mapping.index(inpt[0])
-        g = mapping.index(inpt[1])
-        b = mapping.index(inpt[2])
+        r = mapping_invert[inpt[0]]
+        g = mapping_invert[inpt[1]]
+        b = mapping_invert[inpt[2]]
         r = r+int(r == 254)
         g = g+int(g == 254)
         b = b+int(b == 254)
         return r, g, b
 
     elif mode == 4:
-        r = mapping.index(inpt[0])
-        g = mapping.index(inpt[1])
-        b = mapping.index(inpt[2])
-        a = mapping.index(inpt[3])
+        r = mapping_invert[inpt[0]]
+        g = mapping_invert[inpt[1]]
+        b = mapping_invert[inpt[2]]
+        a = mapping_invert[inpt[3]]
         r = r+int(r == 254)
         g = g+int(g == 254)
         b = b+int(b == 254)
@@ -176,9 +171,9 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
         return r, g, b, a
 
     elif mode == 5:
-        r = mapping.index(inpt[0])
-        g = mapping.index(inpt[1])
-        b = mapping.index(inpt[2])
+        r = mapping_invert[inpt[0]]
+        g = mapping_invert[inpt[1]]
+        b = mapping_invert[inpt[2]]
 
         # compute corrections
         c = ord(inpt[3])-32
@@ -193,10 +188,10 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
             return r+rc, g+gc, b+bc
 
     elif mode == 6:
-        r = mapping.index(inpt[0])
-        g = mapping.index(inpt[1])
-        b = mapping.index(inpt[2])
-        a = mapping.index(inpt[3])
+        r = mapping_invert[inpt[0]]
+        g = mapping_invert[inpt[1]]
+        b = mapping_invert[inpt[2]]
+        a = mapping_invert[inpt[3]]
 
         # compute corrections
         c = ord(inpt[4])-32
@@ -208,7 +203,7 @@ def flexTypeToRGB(inpt: str, mode: int, trans: bool = False):
         return r+rc, g+gc, b+bc, a+ac
 
     elif mode == 7:
-        r = mapping.index(inpt[0])
+        r = mapping_invert[inpt[0]]
         return [r, r, r]
 
     elif mode == 8:
@@ -343,7 +338,7 @@ def graypal(perfect: bool = False):
     else:
         for n in set(mapping):
             if not n in pal:
-                pal[n] = (mapping.index(n), mapping.index(n), mapping.index(n))
+                pal[n] = (mapping_invert[n], mapping_invert[n], mapping_invert[n])
     return pal
 
 def int_alpha_composit(l1: tuple, l2: tuple):
@@ -408,6 +403,8 @@ def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = Fal
                 apf2 = gzip.decompress(compressed_blob)
             elif alg == b'ci':
                 apf2 = asciipak.decompress(compressed_blob)
+            elif alg == b'sq':
+                apf2 = squeeze.decompress(compressed_blob)
             else:
                 raise Exception("Invalid/Unsupported Compression Algorithm")
             apf2 = apf2.decode("ascii")
@@ -416,6 +413,9 @@ def decode(apf2: str | bytes, format: str = 'PNG', returnImageObject: bool = Fal
             apf2 = apf2.decode("ascii")
         elif apf2.startswith(b'\x1f\x8b\x08'):
             apf2 = gzip.decompress(apf2)
+            apf2 = apf2.decode("ascii")
+        elif apf2.startswith(b'v\xff'):
+            apf2 = squeeze.decompress(apf2)
             apf2 = apf2.decode("ascii")
         elif apf2.startswith(b'\x83\x42\x2D\x2A\x95\x69\x45\x41'):
             apf2 = asciipak.decompress(apf2)
@@ -791,9 +791,9 @@ def generate_runs_apf2_l(bitmap: list, lineskip: int, w: int, h: int, topside_fi
         runlens.append(runcounter)
     return runlens
 
-def uint8_to_base95_with_corrector(val):
-    d = mapping[val]
-    c = mapping.index(d)
+def uint8_to_base95_with_corrector(val, bias = 0):
+    d = mapping[val+bias]
+    c = mapping_invert[d]
     e = val - c
     return d, e
 
@@ -849,6 +849,7 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
     perfect = False
     alpha = False
     fakealpha = False
+    bias = 1
 
     if mode in (7, 8):
         gray = True
@@ -857,6 +858,7 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
 
     if mode in (5, 6):
         perfect = True
+        bias = 0
 
     if mode in (4, 6):
         alpha = True
@@ -919,13 +921,13 @@ def generate_runs_apf2_f(bitmap: list, lineskip: int, w: int, h: int, trans, com
                 if combine and pixel == (0,0,0,0) and not isTransPix:
                     pixel = (255,0,255,0) # alpha is zero but the RGB is non-zero
 
-                r, rc = uint8_to_base95_with_corrector(pixel[0])
-                g, gc = uint8_to_base95_with_corrector(pixel[1])
-                b, bc = uint8_to_base95_with_corrector(pixel[2])
+                r, rc = uint8_to_base95_with_corrector(pixel[0], bias)
+                g, gc = uint8_to_base95_with_corrector(pixel[1], bias)
+                b, bc = uint8_to_base95_with_corrector(pixel[2], bias)
                 a, ac = "~", 0
 
                 if alpha:
-                    a, ac = uint8_to_base95_with_corrector(pixel[3])
+                    a, ac = uint8_to_base95_with_corrector(pixel[3], bias)
 
                 # tri-level alpha for free
                 elif fakealpha and perfect:
@@ -1199,14 +1201,14 @@ def encode(img: bytes | Image.Image, lineskip: int = None, findbestlineskip: boo
     if not compressor in (None, "none", "bzip2", "gzip", "asciipak", "squeeze"):
         raise Exception('Error: Invalid Compressor! Options: none, bzip2, gzip, asciipak, squeeze')
 
-    if compressor == "squeeze":
-        raise Exception('Error: squeeze is not currently supported by apftool!')
-
     if compressor in ("bzip2", "gzip") and not compressgood:
         raise Exception('Error: bzip2 and gzip is not currently supported by your python install!')
 
     if compressor == "none":
         compressor = None # set it to the real nonetype
+
+    if useadvancedquant and qmf == "basic": # disable the good quantizer
+        useadvancedquant = False
 
     trans = int(trans) # compatability filter
     if trans > 2:

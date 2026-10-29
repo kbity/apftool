@@ -14,7 +14,7 @@ extensions_mqif = (".mqif", ".mqi")
 
 extensions_txt = (".txt", ".text") # txt is seen as a generic container for apf/apf2 because they're just txt files
 
-version = "1.2.1"
+version = "1.2.3"
 
 extensions_all = []
 extensions_all.extend(extensions_apf+extensions_apf2+extensions_capf2+extensions_wbmp+extensions_otb+extensions_bruh+extensions_mqif)
@@ -26,7 +26,7 @@ def decode(data, format: str = None, returnImageObject: bool = False, provide_ex
         return apf2.decode(data, format, returnImageObject) # apf and af2 decoder
 
     elif isinstance(data, bytes):
-        if data.startswith(b'APERTURE IMAGE FORMAT (c) ') or data.startswith(b'APF2') or data.startswith(b'BZh') or data.startswith(b'\x1f\x8b\x08') or data.startswith(b'\x83\x42\x2D\x2A\x95\x69\x45\x41'): # this makes me GLaD
+        if data.startswith(b'APERTURE IMAGE FORMAT (c) ') or data.startswith(b'APF2') or data.startswith(b'BZh') or data.startswith(b'v\xff') or data.startswith(b'\x1f\x8b\x08') or data.startswith(b'\x83\x42\x2D\x2A\x95\x69\x45\x41'): # this makes me GLaD
             if format is None:
                 format = "PNG"
             return apf2.decode(data, format, returnImageObject, provide_extra_data=provide_extra_data)

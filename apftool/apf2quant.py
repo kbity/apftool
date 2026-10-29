@@ -16,9 +16,12 @@ Pipeline
 """
 import heapq
 
-import numpy as np
-from PIL import Image
-from scipy.spatial import cKDTree
+try:
+    import numpy as np
+    from PIL import Image
+    from scipy.spatial import cKDTree
+except Exception:
+    print("Error Loading numpy or scipy")
 
 # ---------------------------------------------------------------- Oklab ----
 _M1 = np.array([[0.4122214708, 0.5363325363, 0.0514459929],
