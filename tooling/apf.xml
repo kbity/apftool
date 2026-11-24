@@ -68,7 +68,7 @@
   </mime-type>
 
   <mime-type type="image/x-portable-arbitrarymap">
-    <comment>PAM image</comment>
+    <comment>Portable Arbitrary Map image</comment>
     <glob pattern="*.pam"/>
     <magic priority="75">
       <match value="P7" type="string" offset="0" />
