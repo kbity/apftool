@@ -63,7 +63,15 @@
     <comment>KQ image</comment>
     <glob pattern="*.kqi"/>
     <magic priority="100">
-      <match value="KQIF" type="string" offset="0" />
+      <match value="kqif" type="string" offset="0" />
+    </magic>
+  </mime-type>
+
+  <mime-type type="image/x-portable-arbitrarymap">
+    <comment>KQ image</comment>
+    <glob pattern="*.pam"/>
+    <magic priority="75">
+      <match value="P7" type="string" offset="0" />
     </magic>
   </mime-type>
 
